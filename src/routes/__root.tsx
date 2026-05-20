@@ -1,8 +1,15 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { useEffect } from 'react'
+import posthog from 'posthog-js'
 
 import appCss from '../styles.css?url'
+
+const POSTHOG_KEY = 'phc_rAMezUq9q4yqbwjCAwEHLMNcauVJBVAKKjgers36swXV'
+const POSTHOG_HOST = 'https://us.i.posthog.com'
+
+export { posthog }
 
 export const Route = createRootRoute({
   head: () => ({
@@ -28,6 +35,20 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
 })
 
+function PostHogInit() {
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !posthog.__loaded) {
+      posthog.init(POSTHOG_KEY, {
+        api_host: POSTHOG_HOST,
+        capture_pageview: true,
+        capture_pageleave: true,
+        autocapture: false,
+      })
+    }
+  }, [])
+  return null
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
@@ -35,6 +56,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="min-h-screen">
+        <PostHogInit />
         {children}
         <TanStackDevtools
           config={{

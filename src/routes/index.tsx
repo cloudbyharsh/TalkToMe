@@ -1,5 +1,7 @@
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
+import { useEffect } from 'react'
+import { posthog } from './__root'
 import { AuthScreen } from '../components/AuthScreen'
 import { OnboardingScreen } from '../components/OnboardingScreen'
 import { PlaceViewScreen } from '../components/PlaceViewScreen'
@@ -121,6 +123,16 @@ function App() {
   const { scan } = Route.useSearch()
   const router = useRouter()
 
+  // Identify the user in PostHog once session is available
+  useEffect(() => {
+    if (session?.user?.id) {
+      posthog.identify(session.user.id, {
+        username: session.user.username,
+        name: session.user.name,
+      })
+    }
+  }, [session?.user?.id])
+
   const refreshSession = async () => {
     await router.invalidate()
   }
@@ -132,6 +144,38 @@ function App() {
         scan: undefined,
       },
     })
+  }
+
+  // Analytics-wrapped handlers
+  const trackedSetReady: typeof updateReadyState = async (opts) => {
+    const result = await updateReadyState(opts)
+    posthog.capture(opts.data.ready ? 'user_set_ready' : 'user_set_not_ready', {
+      place_id: profile?.currentPlaceId,
+    })
+    return result
+  }
+
+  const trackedLeavePlace: typeof clearCurrentPlace = async (opts) => {
+    posthog.capture('user_left_place', { place_id: profile?.currentPlaceId })
+    return clearCurrentPlace(opts)
+  }
+
+  const trackedConnectScan: typeof connectScannedQr = async (opts) => {
+    const result = await connectScannedQr(opts)
+    if (result.success) posthog.capture('qr_connection_made', { place_id: profile?.currentPlaceId })
+    return result
+  }
+
+  const trackedJoinScannedPlace: typeof joinScannedPlace = async (opts) => {
+    const result = await joinScannedPlace(opts)
+    posthog.capture('scan_join_place')
+    return result
+  }
+
+  const trackedSaveProfile: typeof upsertUserProfile = async (opts) => {
+    const result = await upsertUserProfile(opts)
+    posthog.capture('checked_in', { place_id: opts.data.currentPlaceId })
+    return result
   }
 
   if (!session) {
@@ -146,7 +190,7 @@ function App() {
         refreshSession={refreshSession}
         clearScanToken={clearScanToken}
         loadPreview={loadScanJoinPreview}
-        joinAndConnect={joinScannedPlace}
+        joinAndConnect={trackedJoinScannedPlace}
       />
     )
   }
@@ -162,12 +206,12 @@ function App() {
         initialScanToken={scan ?? null}
         refreshSession={refreshSession}
         clearScanToken={clearScanToken}
-        setReady={updateReadyState}
+        setReady={trackedSetReady}
         saveFinderProfile={updateFinderProfile}
-        leavePlace={clearCurrentPlace}
+        leavePlace={trackedLeavePlace}
         pingParticipant={pingParticipant}
         loadScanPreview={loadScanPreview}
-        connectScan={connectScannedQr}
+        connectScan={trackedConnectScan}
         endConversation={endConversation}
       />
     )
@@ -180,7 +224,7 @@ function App() {
       refreshSession={refreshSession}
       searchNearbyPlaces={searchNearbyPlaces}
       loadNearbyPlacePreview={loadNearbyPlacePreview}
-      saveProfile={upsertUserProfile}
+      saveProfile={trackedSaveProfile}
     />
   )
 }
