@@ -26,23 +26,18 @@ import {
 } from './db/schema'
 import {
   getAppBaseUrl,
-  getGoogleMapsApiKey,
   getUserAgentBinding,
-  getGoogleMapsMapId,
 } from './env'
 
 type SessionResult = Awaited<ReturnType<typeof auth.api.getSession>>
 
-type GoogleNearbyPlace = {
-  id?: string
-  displayName?: {
-    text?: string
-  }
-  formattedAddress?: string
-  location?: {
-    latitude?: number
-    longitude?: number
-  }
+type OverpassElement = {
+  type: 'node' | 'way' | 'relation'
+  id: number
+  lat?: number
+  lon?: number
+  center?: { lat: number; lon: number }
+  tags?: Record<string, string>
 }
 
 function mapSession(session: NonNullable<SessionResult>): AppSession {
@@ -588,23 +583,24 @@ export async function endCurrentConnection() {
   }
 }
 
-function mapGooglePlace(result: GoogleNearbyPlace): NearbyPlace | null {
-  if (
-    !result.id ||
-    !result.displayName?.text ||
-    !result.formattedAddress ||
-    typeof result.location?.latitude !== 'number' ||
-    typeof result.location?.longitude !== 'number'
-  ) {
-    return null
-  }
+function mapOverpassElement(el: OverpassElement): NearbyPlace | null {
+  const tags = el.tags ?? {}
+  const name = tags['name']
+  if (!name) return null
+
+  const lat = el.lat ?? el.center?.lat
+  const lng = el.lon ?? el.center?.lon
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null
+
+  const addrParts = [tags['addr:street'], tags['addr:housenumber'], tags['addr:city']].filter(Boolean)
+  const address = addrParts.length > 0 ? addrParts.join(' ') : name
 
   return {
-    placeId: result.id,
-    name: result.displayName.text,
-    address: result.formattedAddress,
-    lat: result.location.latitude,
-    lng: result.location.longitude,
+    placeId: `osm:${el.type}:${el.id}`,
+    name,
+    address,
+    lat,
+    lng,
     readyCount: 0,
   }
 }
@@ -619,41 +615,27 @@ export async function searchNearbyPlacesForLocation(input: {
     throw new Error('A valid location is required.')
   }
 
-  const response = await fetch(
-    'https://places.googleapis.com/v1/places:searchNearby',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': getGoogleMapsApiKey(),
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.formattedAddress,places.location',
-      },
-      body: JSON.stringify({
-        maxResultCount: 8,
-        locationRestriction: {
-          circle: {
-            center: {
-              latitude: input.latitude,
-              longitude: input.longitude,
-            },
-            radius: 120,
-          },
-        },
-      }),
+  const query = `[out:json][timeout:10];(node["name"](around:120,${input.latitude},${input.longitude});way["name"](around:120,${input.latitude},${input.longitude}););out center 8;`
+
+  const response = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'ReadyToTalk/1.0',
     },
-  )
+    body: `data=${encodeURIComponent(query)}`,
+  })
 
   if (!response.ok) {
     throw new Error('Unable to load nearby places right now.')
   }
 
   const payload = (await response.json()) as {
-    places?: GoogleNearbyPlace[]
+    elements?: OverpassElement[]
   }
 
-  const places = (payload.places ?? [])
-    .map(mapGooglePlace)
+  const places = (payload.elements ?? [])
+    .map(mapOverpassElement)
     .filter((value): value is NearbyPlace => value !== null)
 
   if (places.length > 0) {
@@ -807,11 +789,3 @@ export async function getNearbyPlacePreview(input: { placeId: string }) {
   } satisfies NearbyPlacePreviewState
 }
 
-export async function getGoogleMapsBrowserConfig() {
-  await requireCurrentSession()
-
-  return {
-    apiKey: getGoogleMapsApiKey(),
-    mapId: getGoogleMapsMapId(),
-  }
-}

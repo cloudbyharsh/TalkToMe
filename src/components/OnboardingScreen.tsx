@@ -40,7 +40,6 @@ export function OnboardingScreen({
   refreshSession,
   searchNearbyPlaces,
   loadNearbyPlacePreview,
-  googleMapsConfig,
   saveProfile,
   client = authClient,
 }: {
@@ -58,10 +57,6 @@ export function OnboardingScreen({
       placeId: string
     }
   }) => Promise<NearbyPlacePreviewState>
-  googleMapsConfig: {
-    apiKey: string
-    mapId: string | null
-  } | null
   saveProfile: (input: {
     data: {
       moodEmoji: string
@@ -389,7 +384,6 @@ export function OnboardingScreen({
                     selectedPlaceId={selectedPlaceId}
                     locationCoords={locationCoords}
                     onSelectPlace={setSelectedPlaceId}
-                    googleMapsConfig={googleMapsConfig}
                   />
 
                   <div className="mt-4 space-y-3">

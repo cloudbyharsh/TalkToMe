@@ -1,34 +1,14 @@
+import 'leaflet/dist/leaflet.css'
 import { useEffect, useRef, useState } from 'react'
+import L from 'leaflet'
 import { LoaderCircle, MapPinned } from 'lucide-react'
 import type { NearbyPlace } from '../lib/app-types'
-import {
-  getLoadedGoogleMapsApiKey,
-  loadGoogleMapsApi,
-} from '../lib/google-maps-client'
-
-type MapLike = {
-  fitBounds: (bounds: BoundsLike, padding?: number) => void
-  setCenter: (position: { lat: number; lng: number }) => void
-  setZoom: (zoom: number) => void
-}
-
-type MarkerLike = {
-  addEventListener?: (eventName: string, handler: () => void) => void
-  addListener?: (eventName: string, handler: () => void) => void
-  map?: MapLike | null
-  setMap?: (map: MapLike | null) => void
-}
-
-type BoundsLike = {
-  extend: (position: { lat: number; lng: number }) => void
-}
 
 export function NearbyPlacesMap({
   places,
   selectedPlaceId,
   locationCoords,
   onSelectPlace,
-  googleMapsConfig,
 }: {
   places: NearbyPlace[]
   selectedPlaceId: string | null
@@ -37,239 +17,81 @@ export function NearbyPlacesMap({
     longitude: number
   } | null
   onSelectPlace: (placeId: string) => void
-  googleMapsConfig: {
-    apiKey: string
-    mapId: string | null
-  } | null
 }) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
-  const mapRef = useRef<MapLike | null>(null)
-  const markerRefs = useRef<MarkerLike[]>([])
-  const locationMarkerRef = useRef<MarkerLike | null>(null)
-  const [mapsApiKey, setMapsApiKey] = useState<string | null>(
-    getLoadedGoogleMapsApiKey(),
-  )
-  const [loadingState, setLoadingState] = useState<
-    'idle' | 'config-loading' | 'script-loading' | 'ready'
-  >(mapsApiKey ? 'script-loading' : 'idle')
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  const googleMapsApiKey = googleMapsConfig?.apiKey ?? null
-  const googleMapsMapId = googleMapsConfig?.mapId ?? null
+  const mapRef = useRef<L.Map | null>(null)
+  const markerLayerRef = useRef<L.LayerGroup | null>(null)
+  const locationMarkerRef = useRef<L.Marker | null>(null)
+  const [loadingState, setLoadingState] = useState<'loading' | 'ready'>('loading')
 
   useEffect(() => {
-    if (mapsApiKey || !googleMapsApiKey) {
+    if (places.length === 0 || !mapElementRef.current) {
       return
     }
 
-    setLoadError(null)
-    setMapsApiKey(googleMapsApiKey)
-    setLoadingState('script-loading')
-  }, [googleMapsApiKey, mapsApiKey])
-
-  useEffect(() => {
-    if (places.length === 0) {
-      return
-    }
-
-    if (!googleMapsApiKey && !mapsApiKey) {
-      setLoadError('Missing Google Maps browser key.')
-      setLoadingState('idle')
-      return
-    }
-
-    if (!mapsApiKey || !mapElementRef.current) {
-      return
-    }
-
-    let disposed = false
-    setLoadingState('script-loading')
-
-    void loadGoogleMapsApi(mapsApiKey, {
-      loadMarkerLibrary: Boolean(googleMapsMapId),
-    })
-      .then((maps) => {
-        if (disposed || !mapElementRef.current) {
-          return
-        }
-
-        if (!mapRef.current) {
-          mapRef.current = new maps.Map(mapElementRef.current, {
-            disableDefaultUI: true,
-            clickableIcons: false,
-            gestureHandling: 'greedy',
-            ...(googleMapsMapId ? { mapId: googleMapsMapId } : {}),
-            zoomControl: true,
-            styles: [
-              {
-                featureType: 'poi',
-                stylers: [{ visibility: 'off' }],
-              },
-            ],
-          })
-        }
-
-        markerRefs.current.forEach((marker) => {
-          marker.setMap?.(null)
-        })
-        markerRefs.current = []
-
-        if (locationMarkerRef.current) {
-          locationMarkerRef.current.setMap?.(null)
-          locationMarkerRef.current = null
-        }
-
-        const bounds = new maps.LatLngBounds()
-        const useAdvancedMarkers = Boolean(
-          googleMapsMapId && maps.AdvancedMarkerElement,
-        )
-
-        for (const place of places) {
-          const isSelected = place.placeId === selectedPlaceId
-          const marker = useAdvancedMarkers
-            ? new maps.AdvancedMarkerElement!({
-                content: buildPlaceMarkerNode({
-                  isSelected,
-                  readyCount: place.readyCount,
-                }),
-                gmpClickable: true,
-                map: mapRef.current,
-                position: {
-                  lat: place.lat,
-                  lng: place.lng,
-                },
-                title: place.name,
-              })
-            : new maps.Marker({
-                map: mapRef.current,
-                position: {
-                  lat: place.lat,
-                  lng: place.lng,
-                },
-                title: place.name,
-                label: {
-                  text: String(place.readyCount),
-                  color: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: '700',
-                },
-                icon: {
-                  path: 'M0,-28 C15,-28 28,-15 28,0 C28,15 15,28 0,28 C-15,28 -28,15 -28,0 C-28,-15 -15,-28 0,-28 z',
-                  fillColor: isSelected
-                    ? '#123f35'
-                    : place.readyCount > 0
-                      ? '#0b5d49'
-                      : '#6e8f80',
-                  fillOpacity: 1,
-                  strokeColor: '#ffffff',
-                  strokeWeight: 2,
-                  scale: 0.8,
-                  labelOrigin: {
-                    x: 0,
-                    y: 1,
-                  },
-                },
-              })
-
-          markerRefs.current.push(marker)
-          bounds.extend({
-            lat: place.lat,
-            lng: place.lng,
-          })
-
-          if (useAdvancedMarkers && marker.addEventListener) {
-            marker.addEventListener('gmp-click', () => {
-              onSelectPlace(place.placeId)
-            })
-          } else {
-            marker.addListener?.('click', () => {
-              onSelectPlace(place.placeId)
-            })
-          }
-        }
-
-        if (locationCoords) {
-          locationMarkerRef.current = useAdvancedMarkers
-            ? new maps.AdvancedMarkerElement!({
-                content: buildLocationMarkerNode(),
-                map: mapRef.current,
-                position: {
-                  lat: locationCoords.latitude,
-                  lng: locationCoords.longitude,
-                },
-                title: 'Your location',
-              })
-            : new maps.Marker({
-                map: mapRef.current,
-                position: {
-                  lat: locationCoords.latitude,
-                  lng: locationCoords.longitude,
-                },
-                title: 'Your location',
-                icon: {
-                  path: 'M0,-12 C6.627,-12 12,-6.627 12,0 C12,6.627 6.627,12 0,12 C-6.627,12 -12,6.627 -12,0 C-12,-6.627 -6.627,-12 0,-12 z',
-                  fillColor: '#1b8d6d',
-                  fillOpacity: 1,
-                  strokeColor: '#ffffff',
-                  strokeWeight: 3,
-                  scale: 1,
-                },
-              })
-
-          bounds.extend({
-            lat: locationCoords.latitude,
-            lng: locationCoords.longitude,
-          })
-        }
-
-        if (locationCoords) {
-          mapRef.current.setCenter({
-            lat: locationCoords.latitude,
-            lng: locationCoords.longitude,
-          })
-          mapRef.current.setZoom(17)
-        } else {
-          mapRef.current.fitBounds(bounds, 56)
-        }
-        setLoadingState('ready')
+    if (!mapRef.current) {
+      mapRef.current = L.map(mapElementRef.current, {
+        zoomControl: true,
+        attributionControl: true,
       })
-      .catch((error) => {
-        if (disposed) {
-          return
-        }
 
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : 'Unable to load the real map right now.',
-        )
-        setLoadingState('idle')
-      })
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+      }).addTo(mapRef.current)
+
+      markerLayerRef.current = L.layerGroup().addTo(mapRef.current)
+    }
+
+    markerLayerRef.current?.clearLayers()
+
+    if (locationMarkerRef.current) {
+      locationMarkerRef.current.remove()
+      locationMarkerRef.current = null
+    }
+
+    const bounds = L.latLngBounds([])
+
+    for (const p of places) {
+      const isSelected = p.placeId === selectedPlaceId
+      const icon = buildPlaceIcon({ isSelected, readyCount: p.readyCount })
+      const marker = L.marker([p.lat, p.lng], { icon, title: p.name })
+      marker.on('click', () => onSelectPlace(p.placeId))
+      markerLayerRef.current?.addLayer(marker)
+      bounds.extend([p.lat, p.lng])
+    }
+
+    if (locationCoords) {
+      const locIcon = buildLocationIcon()
+      locationMarkerRef.current = L.marker(
+        [locationCoords.latitude, locationCoords.longitude],
+        { icon: locIcon, title: 'Your location' },
+      ).addTo(mapRef.current)
+      bounds.extend([locationCoords.latitude, locationCoords.longitude])
+    }
+
+    if (locationCoords) {
+      mapRef.current.setView([locationCoords.latitude, locationCoords.longitude], 17)
+    } else if (bounds.isValid()) {
+      mapRef.current.fitBounds(bounds, { padding: [56, 56] })
+    }
+
+    setLoadingState('ready')
 
     return () => {
-      disposed = true
-    }
-  }, [
-    googleMapsApiKey,
-    googleMapsMapId,
-    locationCoords,
-    mapsApiKey,
-    onSelectPlace,
-    places,
-    selectedPlaceId,
-  ])
-
-  useEffect(() => {
-    return () => {
-      markerRefs.current.forEach((marker) => {
-        marker.setMap?.(null)
-      })
-      markerRefs.current = []
-
+      markerLayerRef.current?.clearLayers()
       if (locationMarkerRef.current) {
-        locationMarkerRef.current.setMap?.(null)
+        locationMarkerRef.current.remove()
         locationMarkerRef.current = null
       }
+    }
+  }, [locationCoords, onSelectPlace, places, selectedPlaceId])
+
+  useEffect(() => {
+    return () => {
+      mapRef.current?.remove()
+      mapRef.current = null
+      markerLayerRef.current = null
     }
   }, [])
 
@@ -290,59 +112,47 @@ export function NearbyPlacesMap({
       <div className="relative mt-4 overflow-hidden rounded-[1.75rem] border border-white/80 bg-[#dcebdc] shadow-inner">
         <div ref={mapElementRef} className="aspect-[4/3] w-full" />
 
-        {loadingState === 'config-loading' || loadingState === 'script-loading' ? (
+        {loadingState === 'loading' ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/75 text-[var(--rt-ink-soft)] backdrop-blur-sm">
             <LoaderCircle className="h-6 w-6 animate-spin" />
-            <p className="text-sm font-medium">
-              {loadingState === 'config-loading'
-                ? 'Preparing nearby places map...'
-                : 'Loading real map...'}
-            </p>
+            <p className="text-sm font-medium">Loading nearby map...</p>
           </div>
         ) : null}
 
-        {loadingState === 'idle' ? (
+        {places.length === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/70 text-[var(--rt-ink-soft)] backdrop-blur-sm">
             <MapPinned className="h-7 w-7" />
-            <p className="text-sm font-medium">
-              {loadError ?? 'Preparing nearby places map...'}
-            </p>
+            <p className="text-sm font-medium">Preparing nearby places map...</p>
           </div>
         ) : null}
       </div>
-
-      {loadError ? (
-        <p className="mt-3 text-sm text-rose-700">
-          The list still works below. If this keeps happening, confirm that the
-          Google key has the Maps JavaScript API enabled for this domain.
-        </p>
-      ) : null}
     </div>
   )
 }
 
-function buildPlaceMarkerNode({
+function buildPlaceIcon({
   isSelected,
   readyCount,
 }: {
   isSelected: boolean
   readyCount: number
 }) {
-  const marker = document.createElement('div')
-  marker.className =
-    'flex min-h-11 min-w-11 items-center justify-center rounded-full border-2 border-white px-3 text-sm font-bold text-white shadow-lg'
-  marker.style.backgroundColor = isSelected
-    ? '#123f35'
-    : readyCount > 0
-      ? '#0b5d49'
-      : '#6e8f80'
-  marker.textContent = String(readyCount)
-  return marker
+  const bg = isSelected ? '#123f35' : readyCount > 0 ? '#0b5d49' : '#6e8f80'
+  const html = `<div style="background:${bg};border:2px solid white;border-radius:9999px;min-width:2.75rem;min-height:2.75rem;display:flex;align-items:center;justify-content:center;font-size:0.875rem;font-weight:700;color:white;box-shadow:0 4px 6px -1px rgba(0,0,0,.25),0 2px 4px -1px rgba(0,0,0,.1)">${readyCount}</div>`
+  return L.divIcon({
+    html,
+    className: '',
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  })
 }
 
-function buildLocationMarkerNode() {
-  const marker = document.createElement('div')
-  marker.className =
-    'h-5 w-5 rounded-full border-[3px] border-white bg-[#1b8d6d] shadow-lg'
-  return marker
+function buildLocationIcon() {
+  const html = `<div style="width:1.25rem;height:1.25rem;border-radius:9999px;border:3px solid white;background:#1b8d6d;box-shadow:0 4px 6px -1px rgba(0,0,0,.25)"></div>`
+  return L.divIcon({
+    html,
+    className: '',
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  })
 }

@@ -6,8 +6,6 @@ type AppEnv = Cloudflare.Env & {
   BETTER_AUTH_URL?: string
   BETTER_AUTH_SECRET?: string
   DB?: D1Database
-  GOOGLE_MAPS_API_KEY?: string
-  GOOGLE_MAPS_MAP_ID?: string
   PlaceAgent?: DurableObjectNamespace<PlaceAgent>
   UserAgent?: DurableObjectNamespace<UserAgent>
 }
@@ -36,22 +34,6 @@ export function getDatabaseBinding() {
   }
 
   return database
-}
-
-export function getGoogleMapsApiKey() {
-  const apiKey = appEnv.GOOGLE_MAPS_API_KEY
-
-  if (!apiKey) {
-    throw new Error(
-      'Missing GOOGLE_MAPS_API_KEY. Add it to .dev.vars for local development and set it as a Wrangler secret before deploying.',
-    )
-  }
-
-  return apiKey
-}
-
-export function getGoogleMapsMapId() {
-  return appEnv.GOOGLE_MAPS_MAP_ID ?? null
 }
 
 export function getAppBaseUrl() {
