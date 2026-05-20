@@ -459,7 +459,7 @@ export async function resolveScanToken(input: { token: string }) {
   const token = input.token.trim()
 
   if (!token) {
-    throw new Error('Scan a Ready to Talk QR code first.')
+    throw new Error('Scan a TalkToMe QR code first.')
   }
 
   return resolveScannedHandoff(token, session.user.id)
@@ -522,7 +522,7 @@ export async function previewScanJoin(input: { token: string }) {
   const token = input.token.trim()
 
   if (!token) {
-    throw new Error('Scan a Ready to Talk QR code first.')
+    throw new Error('Scan a TalkToMe QR code first.')
   }
 
   return resolveScanPreview(token, session.user.id)
@@ -533,7 +533,7 @@ export async function joinPlaceAndConnectFromScan(input: { token: string }) {
   const token = input.token.trim()
 
   if (!token) {
-    throw new Error('Scan a Ready to Talk QR code first.')
+    throw new Error('Scan a TalkToMe QR code first.')
   }
 
   const preview = await resolveScanPreview(token, session.user.id)
@@ -621,7 +621,7 @@ export async function searchNearbyPlacesForLocation(input: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'ReadyToTalk/1.0',
+      'User-Agent': 'TalkToMe/1.0',
     },
     body: `data=${encodeURIComponent(query)}`,
   })

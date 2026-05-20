@@ -160,28 +160,39 @@ export function OnboardingScreen({
     setLocationStatus('requesting')
     setLocationError(null)
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocationStatus('granted')
-        void loadNearbyPlaces({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        })
-      },
-      (error) => {
-        setLocationStatus('denied')
-        setLocationError(
-          error.code === error.PERMISSION_DENIED
-            ? 'Location is required before you can use Ready to Talk.'
-            : 'We could not read your location. Try again nearby.',
-        )
-      },
-      {
+    const onSuccess = (position: GeolocationPosition) => {
+      setLocationStatus('granted')
+      void loadNearbyPlaces({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      })
+    }
+
+    const onError = (error: GeolocationPositionError) => {
+      setLocationStatus('denied')
+      if (error.code === error.PERMISSION_DENIED) {
+        setLocationError('Location access is required to use TalkToMe. Please allow it in your browser settings.')
+      } else if (error.code === error.TIMEOUT) {
+        setLocationError('Location took too long to load. Make sure location is enabled on your device and try again.')
+      } else {
+        setLocationError('Unable to read your location. Check that location services are enabled on your device.')
+      }
+    }
+
+    // First try low-accuracy (uses WiFi/cell — fast, works indoors).
+    // This is accurate enough to resolve a nearby Google Place.
+    navigator.geolocation.getCurrentPosition(onSuccess, (lowAccErr) => {
+      // Low-accuracy failed — fall back to GPS with more time.
+      navigator.geolocation.getCurrentPosition(onError, onError, {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      },
-    )
+        timeout: 20000,
+        maximumAge: 30000,
+      })
+    }, {
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 60000, // accept a cached reading up to 1 min old
+    })
   }
 
   useEffect(() => {

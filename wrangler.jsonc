@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "readytotalk-app",
+	"name": "talktome-app",
 	"compatibility_date": "2025-09-02",
 	"compatibility_flags": [
 		"nodejs_compat"
@@ -14,7 +14,7 @@
 		"enabled": true
 	},
 	"vars": {
-		"BETTER_AUTH_URL": "https://readytotalk-app.haarsh-shahh.workers.dev"
+		"BETTER_AUTH_URL": "https://talktome-app.haarsh-shahh.workers.dev"
 	},
 	/**
 	 * Smart Placement
