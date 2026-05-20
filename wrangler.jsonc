@@ -13,14 +13,8 @@
 	"observability": {
 		"enabled": true
 	},
-	"routes": [
-		{
-			"pattern": "readytotalk.app",
-			"custom_domain": true
-		}
-	],
 	"vars": {
-		"BETTER_AUTH_URL": "https://readytotalk.app"
+		"BETTER_AUTH_URL": "https://readytotalk-app.haarsh-shahh.workers.dev"
 	},
 	/**
 	 * Smart Placement
@@ -45,7 +39,7 @@
 		{
 			"binding": "DB",
 			"database_name": "readytotalk-db",
-			"database_id": "672166d0-cd03-4885-9c20-bdb6a78dd159",
+			"database_id": "399c1ea1-22a2-4297-961b-015c729d9ab5",
 			"migrations_dir": "./drizzle"
 		}
 	],

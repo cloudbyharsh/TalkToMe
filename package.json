@@ -39,7 +39,12 @@
 		"tailwindcss": "^4.1.18"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": ["core-js-pure", "esbuild", "sharp", "workerd"]
+		"onlyBuiltDependencies": [
+			"core-js-pure",
+			"esbuild",
+			"sharp",
+			"workerd"
+		]
 	},
 	"devDependencies": {
 		"@tanstack/devtools-vite": "^0.3.11",
@@ -56,6 +61,6 @@
 		"vite": "^7.1.7",
 		"vite-tsconfig-paths": "^5.1.4",
 		"vitest": "^3.0.5",
-		"wrangler": "^4.70.0"
+		"wrangler": "^4.92.0"
 	}
 }

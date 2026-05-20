@@ -21,6 +21,39 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    password: {
+      hash: async (password) => {
+        const enc = new TextEncoder()
+        const keyMaterial = await crypto.subtle.importKey(
+          'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
+        )
+        const salt = crypto.getRandomValues(new Uint8Array(16))
+        const bits = await crypto.subtle.deriveBits(
+          { name: 'PBKDF2', salt, iterations: 1000, hash: 'SHA-256' },
+          keyMaterial, 256
+        )
+        const hashArr = Array.from(new Uint8Array(bits))
+        const saltArr = Array.from(salt)
+        return JSON.stringify({ salt: saltArr, hash: hashArr })
+      },
+      verify: async ({ hash: stored, password }) => {
+        try {
+          const { salt: saltArr, hash: hashArr } = JSON.parse(stored)
+          const enc = new TextEncoder()
+          const keyMaterial = await crypto.subtle.importKey(
+            'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
+          )
+          const bits = await crypto.subtle.deriveBits(
+            { name: 'PBKDF2', salt: new Uint8Array(saltArr), iterations: 1000, hash: 'SHA-256' },
+            keyMaterial, 256
+          )
+          const newHash = Array.from(new Uint8Array(bits))
+          return newHash.every((b, i) => b === hashArr[i])
+        } catch {
+          return false
+        }
+      },
+    },
   },
   plugins: [username(), tanstackStartCookies()],
 })
