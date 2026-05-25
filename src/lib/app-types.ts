@@ -61,7 +61,7 @@ export type AppState = {
   session: AppSession | null
   profile: UserProfileState | null
   currentPlace: CurrentPlaceState | null
-  qrHandoff: QrHandoffState | null
+  pendingIncomingRequests: IncomingConnectRequest[]
   activeConnection: ActiveConnectionState | null
 }
 
@@ -107,6 +107,36 @@ export type PlaceAgentConnectionState = {
   createdAt: string | Date
 }
 
+export type ActiveConnectionState = {
+  id: string
+  placeId: string
+  createdAt: string | Date
+  counterpart: {
+    userId: string
+    username: string
+    moodEmoji: string | null
+    intentSummary: string | null
+  }
+}
+
+// Connect request types (replace QR scan as the primary connection mechanism)
+export type ConnectRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
+
+export type IncomingConnectRequest = {
+  id: string
+  placeId: string
+  introMessage: string | null
+  createdAt: string | Date
+  requester: {
+    userId: string
+    username: string
+    moodEmoji: string | null
+    intentSummary: string | null
+  }
+}
+
+// QrHandoffState and ConnectionPreviewState kept for backwards compatibility
+// during migration but are no longer returned by getAppState.
 export type QrHandoffState = {
   token: string
   url: string
@@ -124,17 +154,5 @@ export type ConnectionPreviewState = {
     moodEmoji: string | null
     intentSummary: string | null
     status: PresenceStatus
-  }
-}
-
-export type ActiveConnectionState = {
-  id: string
-  placeId: string
-  createdAt: string | Date
-  counterpart: {
-    userId: string
-    username: string
-    moodEmoji: string | null
-    intentSummary: string | null
   }
 }

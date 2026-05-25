@@ -57,17 +57,6 @@ vi.mock('agents/react', () => ({
   useAgent: useAgentMock,
 }))
 
-vi.mock('qrcode', () => ({
-  toDataURL: vi.fn(async () => 'data:image/png;base64,qr'),
-}))
-
-vi.mock('jsqr', () => ({
-  default: vi.fn(() => null),
-}))
-
-const originalMediaDevices = navigator.mediaDevices
-const originalPlay = HTMLMediaElement.prototype.play
-const originalCanvasGetContext = HTMLCanvasElement.prototype.getContext
 const originalDeviceMotionEvent = window.DeviceMotionEvent
 
 function renderPlaceViewScreen(
@@ -109,16 +98,9 @@ function renderPlaceViewScreen(
       },
       readyCount: 2,
     },
-    qrHandoff: {
-      token: 'qr-token',
-      url: 'https://talktome-app.haarsh-shahh.workers.dev/?scan=qr-token',
-      expiresAt: '2026-03-05T00:00:00.000Z',
-      isActive: false,
-    },
     activeConnection: null,
-    initialScanToken: null,
+    pendingIncomingRequests: [],
     refreshSession: vi.fn(async () => undefined),
-    clearScanToken: vi.fn(async () => undefined),
     setReady: vi.fn(async () => undefined),
     saveFinderProfile: vi.fn(async () => ({
       userId: 'user-1',
@@ -137,19 +119,8 @@ function renderPlaceViewScreen(
     })),
     leavePlace: vi.fn(async () => undefined),
     pingParticipant: vi.fn(async () => ({ success: true })),
-    loadScanPreview: vi.fn(async () => ({
-      token: 'qr-token',
-      placeId: 'place-1',
-      placeName: 'Quiet Cafe',
-      counterpart: {
-        userId: 'user-2',
-        username: 'someone',
-        moodEmoji: '🙂',
-        intentSummary: 'Open to a quick hello.',
-        status: 'ready' as const,
-      },
-    })),
-    connectScan: vi.fn(async () => ({ success: true })),
+    sendConnectRequest: vi.fn(async () => ({ success: true, requestId: 'req-1' })),
+    respondToRequest: vi.fn(async () => ({ success: true, accepted: true })),
     endConversation: vi.fn(async () => ({ success: true })),
     client: {
       signOut: vi.fn(async () => ({ error: null })),
@@ -177,23 +148,10 @@ afterEach(() => {
   vi.useRealTimers()
   cleanup()
   useAgentMock.mockClear()
-  Object.defineProperty(navigator, 'mediaDevices', {
-    configurable: true,
-    value: originalMediaDevices,
-  })
-  Object.defineProperty(HTMLMediaElement.prototype, 'play', {
-    configurable: true,
-    value: originalPlay,
-  })
-  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-    configurable: true,
-    value: originalCanvasGetContext,
-  })
   Object.defineProperty(window, 'DeviceMotionEvent', {
     configurable: true,
     value: originalDeviceMotionEvent,
   })
-  window.BarcodeDetector = undefined
 })
 
 describe('PlaceViewScreen', () => {
@@ -208,46 +166,6 @@ describe('PlaceViewScreen', () => {
     )
 
     expect(await screen.findByText('7')).toBeTruthy()
-  })
-
-  it('starts the camera even when BarcodeDetector is unavailable', async () => {
-    const stop = vi.fn()
-    const getUserMedia = vi.fn(async () => ({
-      getTracks: () => [{ stop }],
-    }))
-
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: {
-        getUserMedia,
-      },
-    })
-    Object.defineProperty(HTMLMediaElement.prototype, 'play', {
-      configurable: true,
-      value: vi.fn(async () => undefined),
-    })
-    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-      configurable: true,
-      value: vi.fn(() => ({
-        drawImage: vi.fn(),
-        getImageData: vi.fn(() => ({
-          data: new Uint8ClampedArray(4),
-        })),
-      })),
-    })
-    window.BarcodeDetector = undefined
-
-    renderPlaceViewScreen()
-
-    screen.getByRole('button', { name: 'Scan someone nearby' }).click()
-
-    await waitFor(() => {
-      expect(getUserMedia).toHaveBeenCalledTimes(1)
-    })
-
-    expect(
-      screen.queryByText(/camera scanning is not available here/i),
-    ).toBeNull()
   })
 
   it('marks a ready user not ready after sustained face-down motion', async () => {
@@ -365,5 +283,29 @@ describe('PlaceViewScreen', () => {
     })
 
     dateNow.mockRestore()
+  })
+
+  it('renders incoming connect requests with accept and decline buttons', async () => {
+    renderPlaceViewScreen({
+      pendingIncomingRequests: [
+        {
+          id: 'req-1',
+          placeId: 'place-1',
+          introMessage: 'Hey, would love to chat about startups!',
+          createdAt: '2026-03-04T19:20:00.000Z',
+          requester: {
+            userId: 'user-2',
+            username: 'neighbour',
+            moodEmoji: '☕',
+            intentSummary: 'Coffee chat',
+          },
+        },
+      ],
+    })
+
+    expect(await screen.findByText('neighbour')).toBeTruthy()
+    expect(screen.getByText('"Hey, would love to chat about startups!"')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /accept/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /decline/i })).toBeTruthy()
   })
 })

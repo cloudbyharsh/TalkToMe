@@ -168,6 +168,34 @@ export const handoffConnection = sqliteTable(
   ],
 )
 
+// Connect requests replace QR-scan as the primary way to initiate a conversation.
+// User A sends a request with an optional intro message; User B accepts or rejects.
+// On acceptance a handoffConnection is created and both users move to in_conversation.
+export const connectRequest = sqliteTable(
+  'connect_request',
+  {
+    id: text('id').primaryKey(),
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    recipientUserId: text('recipient_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    placeId: text('place_id')      .notNull()
+      .references(() => place.placeId, { onDelete: 'cascade' }),
+    introMessage: text('intro_message'),
+    // pending | accepted | rejected | cancelled
+    status: text('status').notNull().default('pending'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('connect_request_requester_idx').on(table.requesterUserId),
+    index('connect_request_recipient_idx').on(table.recipientUserId),
+    index('connect_request_place_idx').on(table.placeId),
+  ],
+)
+
 export const userRelations = relations(user, ({ many, one }) => ({
   accounts: many(account),
   sessions: many(session),

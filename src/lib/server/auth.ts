@@ -22,8 +22,7 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     password: {
-      hash: async (password) => {
-        const enc = new TextEncoder()
+      hash: async (password) => {        const enc = new TextEncoder()
         const keyMaterial = await crypto.subtle.importKey(
           'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
         )

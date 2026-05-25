@@ -150,6 +150,13 @@ export function OnboardingScreen({
     }
   }
 
+  // iOS Safari has two layers of location permission (system-level Location Services
+  // AND per-site Safari permission). navigator.permissions.query is also unreliable
+  // on iOS, so we detect the platform and handle it separately.
+  const isIOS =
+    typeof navigator !== 'undefined' &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent)
+
   const handleEnableLocation = () => {
     if (!navigator.geolocation) {
       setLocationStatus('unsupported')
@@ -171,36 +178,49 @@ export function OnboardingScreen({
     const onError = (error: GeolocationPositionError) => {
       setLocationStatus('denied')
       if (error.code === error.PERMISSION_DENIED) {
-        setLocationError('Location access is required to use TalkToMe. Please allow it in your browser settings.')
+        if (isIOS) {
+          setLocationError(
+            'Location access was blocked. On iPhone: go to Settings → Privacy & Security → Location Services → Safari → set to "While Using the App". Then come back and try again.',
+          )
+        } else {
+          setLocationError(
+            'Location access is required. Please allow it in your browser settings and try again.',
+          )
+        }
       } else if (error.code === error.TIMEOUT) {
-        setLocationError('Location took too long to load. Make sure location is enabled on your device and try again.')
+        setLocationError(
+          'Location took too long. Make sure location services are on and try again.',
+        )
       } else {
-        setLocationError('Unable to read your location. Check that location services are enabled on your device.')
+        setLocationError(
+          'Unable to read your location. Check that location services are enabled on your device and try again.',
+        )
       }
     }
 
-    // First try low-accuracy (uses WiFi/cell — fast, works indoors).
-    // This is accurate enough to resolve a nearby Google Place.
-    navigator.geolocation.getCurrentPosition(onSuccess, (lowAccErr) => {
-      // Low-accuracy failed — fall back to GPS with more time.
-      navigator.geolocation.getCurrentPosition(onError, onError, {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 30000,
-      })
-    }, {
+    // Use a single getCurrentPosition call with settings tuned for mobile.
+    // enableHighAccuracy: false uses WiFi/cell positioning — faster, more
+    // reliable indoors, and avoids the iOS GPS cold-start delay. A 15s timeout
+    // accommodates slow responses without being as aggressive as the previous 8s.
+    // The nested dual-call pattern (calling getCurrentPosition a second time
+    // inside the error callback) is unreliable on iOS Safari and is avoided here.
+    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
       enableHighAccuracy: false,
-      timeout: 8000,
-      maximumAge: 60000, // accept a cached reading up to 1 min old
+      timeout: 15000,
+      maximumAge: 60000,
     })
   }
 
   useEffect(() => {
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.geolocation ||
-      !navigator.permissions?.query
-    ) {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return
+    }
+
+    // navigator.permissions.query for geolocation is unreliable on iOS Safari —
+    // it may return stale state or not fire the change event correctly.
+    // On iOS we skip the auto-trigger entirely and let the user tap the button,
+    // which is also required on iOS because geolocation must be user-gesture-initiated.
+    if (isIOS || !navigator.permissions?.query) {
       return
     }
 
@@ -640,7 +660,7 @@ function PreviewMetricCard({
   label: string
   value: string
 }) {
-  return (
+  return (
     <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] px-4 py-4">
       <div className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-ink-soft)]">
         {icon}

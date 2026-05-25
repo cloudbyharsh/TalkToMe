@@ -5,12 +5,11 @@ import type {
   ActiveConnectionState,
   AppSession,
   AppState,
-  ConnectionPreviewState,
   CurrentPlaceState,
+  IncomingConnectRequest,
   NearbyPlace,
   NearbyPlacePreviewState,
   PresenceStatus,
-  QrHandoffState,
   UserAgentState,
   UserProfileState,
 } from '../app-types'
@@ -18,14 +17,13 @@ import { auth } from './auth'
 import { db } from './db'
 import type { UserAgent } from './agents/user-agent'
 import {
-  handoffCode,
+  connectRequest,
   handoffConnection,
   place,
   user,
   userProfile,
 } from './db/schema'
 import {
-  getAppBaseUrl,
   getUserAgentBinding,
 } from './env'
 
@@ -92,61 +90,51 @@ function getDisplayUsername(record: typeof user.$inferSelect) {
   return record.displayUsername || record.username || record.name
 }
 
-function createHandoffToken() {
-  return crypto.randomUUID().replaceAll('-', '')
-}
-
-function buildQrUrl(token: string) {
-  const url = new URL(getAppBaseUrl())
-  url.searchParams.set('scan', token)
-  return url.toString()
-}
-
-async function getOrCreateQrHandoff(
-  userId: string,
+async function getPendingIncomingRequests(
+  recipientUserId: string,
   placeId: string,
-  status: PresenceStatus,
-): Promise<QrHandoffState> {
-  const now = new Date()
-  const expiresAt = new Date(now.getTime() + 12 * 60 * 60 * 1000)
-  const [existingCode] = await db
-    .select()
-    .from(handoffCode)
-    .where(eq(handoffCode.userId, userId))
-    .limit(1)
-
-  let token = existingCode?.token ?? createHandoffToken()
-
-  if (existingCode && existingCode.expiresAt <= now) {
-    token = createHandoffToken()
-  }
-
-  await db
-    .insert(handoffCode)
-    .values({
-      token,
-      userId,
-      placeId,
-      expiresAt,
-      createdAt: existingCode?.createdAt ?? now,
-      updatedAt: now,
+): Promise<IncomingConnectRequest[]> {
+  const rows = await db
+    .select({
+      id: connectRequest.id,
+      placeId: connectRequest.placeId,
+      introMessage: connectRequest.introMessage,
+      createdAt: connectRequest.createdAt,
+      requesterUserId: connectRequest.requesterUserId,
+      requesterDisplayUsername: user.displayUsername,
+      requesterUsername: user.username,
+      requesterName: user.name,
+      requesterMoodEmoji: userProfile.moodEmoji,
+      requesterIntentSummary: userProfile.intentSummary,
     })
-    .onConflictDoUpdate({
-      target: handoffCode.userId,
-      set: {
-        token,
-        placeId,
-        expiresAt,
-        updatedAt: now,
-      },
-    })
+    .from(connectRequest)
+    .innerJoin(user, eq(user.id, connectRequest.requesterUserId))
+    .leftJoin(userProfile, eq(userProfile.userId, connectRequest.requesterUserId))
+    .where(
+      and(
+        eq(connectRequest.recipientUserId, recipientUserId),
+        eq(connectRequest.placeId, placeId),
+        eq(connectRequest.status, 'pending'),
+      ),
+    )
+    .orderBy(desc(connectRequest.createdAt))
+    .limit(10)
 
-  return {
-    token,
-    url: buildQrUrl(token),
-    expiresAt,
-    isActive: status === 'ready',
-  }
+  return rows.map((row) => ({
+    id: row.id,
+    placeId: row.placeId,
+    introMessage: row.introMessage,
+    createdAt: row.createdAt,
+    requester: {
+      userId: row.requesterUserId,
+      username:
+        row.requesterDisplayUsername ||
+        row.requesterUsername ||
+        row.requesterName,
+      moodEmoji: row.requesterMoodEmoji ?? null,
+      intentSummary: row.requesterIntentSummary ?? null,
+    },
+  }))
 }
 
 async function getActiveConnectionForUser(
@@ -200,82 +188,6 @@ async function getActiveConnectionForUser(
       username: getDisplayUsername(counterpartUser),
       moodEmoji: counterpartProfile.moodEmoji,
       intentSummary: counterpartProfile.intentSummary,
-    },
-  }
-}
-
-async function resolveScannedHandoff(
-  token: string,
-  viewerUserId: string,
-): Promise<ConnectionPreviewState> {
-  const [viewerProfile] = await db
-    .select()
-    .from(userProfile)
-    .where(eq(userProfile.userId, viewerUserId))
-    .limit(1)
-  const preview = await resolveScanPreview(token, viewerUserId)
-
-  if (!viewerProfile?.currentPlaceId) {
-    throw new Error('Pick your current place before scanning someone nearby.')
-  }
-
-  if (viewerProfile.currentPlaceId !== preview.placeId) {
-    throw new Error('That QR code belongs to someone in a different place.')
-  }
-
-  return preview
-}
-
-async function resolveScanPreview(
-  token: string,
-  viewerUserId: string,
-): Promise<ConnectionPreviewState> {
-  const now = new Date()
-
-  const [codeRecord] = await db
-    .select()
-    .from(handoffCode)
-    .where(eq(handoffCode.token, token))
-    .limit(1)
-
-  if (!codeRecord || codeRecord.expiresAt <= now) {
-    throw new Error('That QR code expired. Ask them to reopen their place view.')
-  }
-
-  if (codeRecord.userId === viewerUserId) {
-    throw new Error('That is your own QR code.')
-  }
-
-  const [targetUser] = await db
-    .select()
-    .from(user)
-    .where(eq(user.id, codeRecord.userId))
-    .limit(1)
-  const [targetProfile] = await db
-    .select()
-    .from(userProfile)
-    .where(eq(userProfile.userId, codeRecord.userId))
-    .limit(1)
-  const [targetPlace] = await db
-    .select()
-    .from(place)
-    .where(eq(place.placeId, codeRecord.placeId))
-    .limit(1)
-
-  if (!targetUser || !targetProfile || !targetPlace) {
-    throw new Error('We could not resolve that person right now.')
-  }
-
-  return {
-    token,
-    placeId: targetPlace.placeId,
-    placeName: targetPlace.name,
-    counterpart: {
-      userId: targetUser.id,
-      username: getDisplayUsername(targetUser),
-      moodEmoji: targetProfile.moodEmoji,
-      intentSummary: targetProfile.intentSummary,
-      status: targetProfile.status as PresenceStatus,
     },
   }
 }
@@ -335,7 +247,7 @@ export async function getAppState(): Promise<AppState> {
       session: null,
       profile: null,
       currentPlace: null,
-      qrHandoff: null,
+      pendingIncomingRequests: [],
       activeConnection: null,
     }
   }
@@ -347,7 +259,7 @@ export async function getAppState(): Promise<AppState> {
     .limit(1)
 
   let currentPlace: CurrentPlaceState | null = null
-  let qrHandoff: QrHandoffState | null = null
+  let pendingIncomingRequests: IncomingConnectRequest[] = []
 
   if (profileRecord?.currentPlaceId) {
     const [currentPlaceRecord] = await db
@@ -374,10 +286,9 @@ export async function getAppState(): Promise<AppState> {
         readyCount,
       }
 
-      qrHandoff = await getOrCreateQrHandoff(
+      pendingIncomingRequests = await getPendingIncomingRequests(
         session.user.id,
         profileRecord.currentPlaceId,
-        profileRecord.status as PresenceStatus,
       )
     }
   }
@@ -386,7 +297,7 @@ export async function getAppState(): Promise<AppState> {
     session: mapSession(session),
     profile: profileRecord ? mapUserProfile(profileRecord) : null,
     currentPlace,
-    qrHandoff,
+    pendingIncomingRequests,
     activeConnection: await getActiveConnectionForUser(session.user.id),
   }
 }
@@ -454,123 +365,193 @@ export async function leaveCurrentPlace() {
   await agent.leavePlace()
 }
 
-export async function resolveScanToken(input: { token: string }) {
+export async function sendConnectRequest(input: {
+  recipientUserId: string
+  introMessage: string
+}) {
   const session = await requireCurrentSession()
-  const token = input.token.trim()
+  const recipientUserId = input.recipientUserId.trim()
+  const introMessage = input.introMessage.replace(/\s+/g, ' ').trim() || null
 
-  if (!token) {
-    throw new Error('Scan a TalkToMe QR code first.')
+  if (!recipientUserId) {
+    throw new Error('Choose someone to connect with.')
   }
 
-  return resolveScannedHandoff(token, session.user.id)
-}
+  if (recipientUserId === session.user.id) {
+    throw new Error('You cannot send a request to yourself.')
+  }
 
-export async function connectFromScan(input: { token: string }) {
-  const session = await requireCurrentSession()
-  const preview = await resolveScannedHandoff(input.token.trim(), session.user.id)
   const [viewerProfile] = await db
     .select()
     .from(userProfile)
     .where(eq(userProfile.userId, session.user.id))
     .limit(1)
-  const [targetProfile] = await db
-    .select()
-    .from(userProfile)
-    .where(eq(userProfile.userId, preview.counterpart.userId))
-    .limit(1)
 
-  if (!viewerProfile?.currentPlaceId || viewerProfile.currentPlaceId !== preview.placeId) {
-    throw new Error('You need to be checked into the same place first.')
+  if (!viewerProfile?.currentPlaceId) {
+    throw new Error('Join a place before sending a connect request.')
   }
 
   if (viewerProfile.status === 'in_conversation') {
-    throw new Error('End your current conversation before starting another one.')
+    throw new Error('End your current conversation before sending a new request.')
   }
 
-  if (!targetProfile?.currentPlaceId || targetProfile.currentPlaceId !== preview.placeId) {
-    throw new Error('They are no longer checked into this place.')
-  }
-
-  if (targetProfile.status !== 'ready') {
-    throw new Error('They are not marked ready right now.')
-  }
-
-  const existingConnection = await getActiveConnectionForUser(session.user.id)
-  if (existingConnection) {
-    throw new Error('You are already connected with someone nearby.')
-  }
-
-  const targetConnection = await getActiveConnectionForUser(preview.counterpart.userId)
-  if (targetConnection) {
-    throw new Error('They are already in a conversation.')
-  }
-
-  const agent = await getUserAgent(session.user.id)
-  const result = await agent.connectWithUser({
-    counterpartUserId: preview.counterpart.userId,
-    placeId: preview.placeId,
-  })
-
-  return {
-    success: result.success,
-    connectionId: result.connectionId,
-  }
-}
-
-export async function previewScanJoin(input: { token: string }) {
-  const session = await requireCurrentSession()
-  const token = input.token.trim()
-
-  if (!token) {
-    throw new Error('Scan a TalkToMe QR code first.')
-  }
-
-  return resolveScanPreview(token, session.user.id)
-}
-
-export async function joinPlaceAndConnectFromScan(input: { token: string }) {
-  const session = await requireCurrentSession()
-  const token = input.token.trim()
-
-  if (!token) {
-    throw new Error('Scan a TalkToMe QR code first.')
-  }
-
-  const preview = await resolveScanPreview(token, session.user.id)
-  const [targetProfile] = await db
+  const [recipientProfile] = await db
     .select()
     .from(userProfile)
-    .where(eq(userProfile.userId, preview.counterpart.userId))
+    .where(eq(userProfile.userId, recipientUserId))
     .limit(1)
 
-  if (!targetProfile?.currentPlaceId || targetProfile.currentPlaceId !== preview.placeId) {
-    throw new Error('They are no longer checked into this place.')
+  if (
+    !recipientProfile?.currentPlaceId ||
+    recipientProfile.currentPlaceId !== viewerProfile.currentPlaceId
+  ) {
+    throw new Error('That person is no longer at this place.')
   }
 
-  if (targetProfile.status !== 'ready') {
-    throw new Error('They are not marked ready right now.')
+  if (recipientProfile.status !== 'ready') {
+    throw new Error('That person is not marked ready right now.')
   }
 
-  const existingConnection = await getActiveConnectionForUser(session.user.id)
-  if (existingConnection) {
-    throw new Error('You are already connected with someone nearby.')
-  }
+  // Cancel any existing pending request from this requester to this recipient at this place.
+  const now = new Date()
+  await db
+    .update(connectRequest)
+    .set({ status: 'cancelled', updatedAt: now })
+    .where(
+      and(
+        eq(connectRequest.requesterUserId, session.user.id),
+        eq(connectRequest.recipientUserId, recipientUserId),
+        eq(connectRequest.placeId, viewerProfile.currentPlaceId),
+        eq(connectRequest.status, 'pending'),
+      ),
+    )
 
-  const targetConnection = await getActiveConnectionForUser(preview.counterpart.userId)
-  if (targetConnection) {
-    throw new Error('They are already in a conversation.')
-  }
-
-  const agent = await getUserAgent(session.user.id)
-  const result = await agent.joinPlaceAndConnectWithUser({
-    counterpartUserId: preview.counterpart.userId,
-    placeId: preview.placeId,
+  const requestId = crypto.randomUUID()
+  await db.insert(connectRequest).values({
+    id: requestId,
+    requesterUserId: session.user.id,
+    recipientUserId,
+    placeId: viewerProfile.currentPlaceId,
+    introMessage,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
   })
 
-  return {
-    success: result.success,
-    connectionId: result.connectionId,
+  return { success: true, requestId }
+}
+
+export async function respondToConnectRequest(input: {
+  requestId: string
+  accept: boolean
+}) {
+  const session = await requireCurrentSession()
+  const requestId = input.requestId.trim()
+
+  if (!requestId) {
+    throw new Error('No request specified.')
   }
+
+  const [requestRecord] = await db
+    .select()
+    .from(connectRequest)
+    .where(eq(connectRequest.id, requestId))
+    .limit(1)
+
+  if (!requestRecord) {
+    throw new Error('That request no longer exists.')
+  }
+
+  if (requestRecord.recipientUserId !== session.user.id) {
+    throw new Error('You cannot respond to this request.')
+  }
+
+  if (requestRecord.status !== 'pending') {
+    throw new Error('That request is no longer pending.')
+  }
+
+  const now = new Date()
+
+  if (!input.accept) {
+    await db
+      .update(connectRequest)
+      .set({ status: 'rejected', updatedAt: now })
+      .where(eq(connectRequest.id, requestId))
+
+    return { success: true, accepted: false }
+  }
+
+  // Accepting: validate both users are still ready in the same place.
+  const [recipientProfile] = await db
+    .select()
+    .from(userProfile)
+    .where(eq(userProfile.userId, session.user.id))
+    .limit(1)
+
+  const [requesterProfile] = await db
+    .select()
+    .from(userProfile)
+    .where(eq(userProfile.userId, requestRecord.requesterUserId))
+    .limit(1)
+
+  if (
+    !recipientProfile?.currentPlaceId ||
+    recipientProfile.currentPlaceId !== requestRecord.placeId
+  ) {
+    throw new Error('You are no longer at the same place.')
+  }
+
+  if (recipientProfile.status === 'in_conversation') {
+    throw new Error('End your current conversation before accepting a request.')
+  }
+
+  if (
+    !requesterProfile?.currentPlaceId ||
+    requesterProfile.currentPlaceId !== requestRecord.placeId
+  ) {
+    await db
+      .update(connectRequest)
+      .set({ status: 'cancelled', updatedAt: now })
+      .where(eq(connectRequest.id, requestId))
+
+    throw new Error('That person has left the place. The request was cancelled.')
+  }
+
+  if (requesterProfile.status === 'in_conversation') {
+    await db
+      .update(connectRequest)
+      .set({ status: 'cancelled', updatedAt: now })
+      .where(eq(connectRequest.id, requestId))
+
+    throw new Error('That person is already in a conversation.')
+  }
+
+  const existingRecipientConnection = await getActiveConnectionForUser(session.user.id)
+  if (existingRecipientConnection) {
+    throw new Error('You are already connected with someone.')
+  }
+
+  const existingRequesterConnection = await getActiveConnectionForUser(
+    requestRecord.requesterUserId,
+  )
+  if (existingRequesterConnection) {
+    throw new Error('That person is already in a conversation.')
+  }
+
+  // Mark request accepted and create the active connection.
+  await db
+    .update(connectRequest)
+    .set({ status: 'accepted', updatedAt: now })
+    .where(eq(connectRequest.id, requestId))
+
+  // The recipient is the "agent" here — they trigger the connection creation.
+  const agent = await getUserAgent(session.user.id)
+  const result = await agent.connectWithUser({
+    counterpartUserId: requestRecord.requesterUserId,
+    placeId: requestRecord.placeId,
+  })
+
+  return { success: result.success, accepted: true, connectionId: result.connectionId }
 }
 
 export async function endCurrentConnection() {
@@ -785,7 +766,6 @@ export async function getNearbyPlacePreview(input: { placeId: string }) {
         pingRequestedAt: record.pingRequestedAt,
         pingRequestedByUserId: record.pingRequestedByUserId ?? null,
         pingRequestedByUsername: record.pingRequestedByUsername ?? null,
-      })),
-  } satisfies NearbyPlacePreviewState
+      })),  } satisfies NearbyPlacePreviewState
 }
 

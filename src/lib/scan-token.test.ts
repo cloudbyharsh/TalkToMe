@@ -12,7 +12,6 @@ describe('extractScanToken', () => {
     expect(extractScanToken('token-123')).toBe('token-123')
   })
 
-  it('returns null for empty input', () => {
-    expect(extractScanToken('   ')).toBeNull()
+  it('returns null for empty input', () => {    expect(extractScanToken('   ')).toBeNull()
   })
 })

@@ -1,19 +1,15 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import jsQR from 'jsqr'
-import * as QRCode from 'qrcode'
 import { useAgent } from 'agents/react'
 import {
   ArrowLeft,
   BellRing,
-  Camera,
   Check,
   LocateFixed,
   MapPin,
   MessageCircle,
-  QrCode,
   Radio,
-  ScanLine,
+  Send,
   Users,
   X,
 } from 'lucide-react'
@@ -21,35 +17,26 @@ import { authClient } from '../lib/auth-client'
 import type {
   ActiveConnectionState,
   AppSession,
-  ConnectionPreviewState,
   CurrentPlaceState,
+  IncomingConnectRequest,
   PlaceAgentState,
-  QrHandoffState,
   UserProfileState,
 } from '../lib/app-types'
-import { extractScanToken } from '../lib/scan-token'
 import type { PlaceAgent } from '../lib/server/agents/place-agent'
 
-type DetectedCode = {
-  rawValue?: string
+type AuthResult = {
+  error?: {
+    message?: string | null
+  } | null
 }
 
-type BarcodeDetectorLike = {
-  detect: (source: CanvasImageSource) => Promise<DetectedCode[]>
+type PlaceViewClientLike = {
+  signOut: () => Promise<AuthResult>
 }
 
-type BarcodeDetectorCtor = new (options?: {
-  formats?: string[]
-}) => BarcodeDetectorLike
-
-type QrFrameDetector = {
-  detect: (source: HTMLVideoElement) => Promise<string | null>
-}
-
-type MotionPermissionResponse = 'granted' | 'denied'
-
-type DeviceMotionEventWithPermission = typeof DeviceMotionEvent & {
-  requestPermission?: () => Promise<MotionPermissionResponse>
+type ConversationNoticeState = {
+  title: string
+  description: string
 }
 
 type MotionAccessState =
@@ -59,16 +46,24 @@ type MotionAccessState =
   | 'active'
   | 'denied'
 
+type MotionPermissionResponse = 'granted' | 'denied'
+
+type DeviceMotionEventWithPermission = typeof DeviceMotionEvent & {
+  requestPermission?: () => Promise<MotionPermissionResponse>
+}
+
 const FACE_DOWN_HORIZONTAL_THRESHOLD = 4
 const FACE_DOWN_Z_THRESHOLD = -7
 const FACE_DOWN_HOLD_MS = 1200
 const MOTION_ARM_DELAY_MS = 1500
 
-declare global {
-  interface Window {
-    BarcodeDetector?: BarcodeDetectorCtor
-  }
-}
+const finderHintOptions = [
+  'Front tables',
+  'Counter',
+  'Window seats',
+  'Patio',
+  'Back corner',
+] as const
 
 function getInitialMotionAccessState(): MotionAccessState {
   if (typeof window === 'undefined' || !('DeviceMotionEvent' in window)) {
@@ -91,20 +86,11 @@ function getInitialMotionAccessState(): MotionAccessState {
 function isFaceDownReading(
   acceleration: DeviceMotionEvent['accelerationIncludingGravity'] | null,
 ) {
-  if (!acceleration) {
-    return false
-  }
-
+  if (!acceleration) return false
   const { x, y, z } = acceleration
-
-  if (
-    typeof x !== 'number' ||
-    typeof y !== 'number' ||
-    typeof z !== 'number'
-  ) {
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
     return false
   }
-
   return (
     Math.abs(x) <= FACE_DOWN_HORIZONTAL_THRESHOLD &&
     Math.abs(y) <= FACE_DOWN_HORIZONTAL_THRESHOLD &&
@@ -112,112 +98,13 @@ function isFaceDownReading(
   )
 }
 
-function createQrFrameDetector(): QrFrameDetector | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  const BarcodeDetector = window.BarcodeDetector
-
-  if (BarcodeDetector) {
-    const detector = new BarcodeDetector({
-      formats: ['qr_code'],
-    })
-
-    return {
-      detect: async (source) => {
-        const results = await detector.detect(source)
-        return results[0]?.rawValue ?? null
-      },
-    }
-  }
-
-  if (typeof document === 'undefined') {
-    return null
-  }
-
-  const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d', {
-    willReadFrequently: true,
-  })
-
-  if (!context) {
-    return null
-  }
-
-  return {
-    detect: async (source) => {
-      const width = source.videoWidth
-      const height = source.videoHeight
-
-      if (!width || !height) {
-        return null
-      }
-
-      if (canvas.width !== width) {
-        canvas.width = width
-      }
-
-      if (canvas.height !== height) {
-        canvas.height = height
-      }
-
-      context.drawImage(source, 0, 0, width, height)
-
-      const imageData = context.getImageData(0, 0, width, height)
-      const result = jsQR(imageData.data, width, height)
-
-      return result?.data ?? null
-    },
-  }
-}
-
-type AuthResult = {
-  error?: {
-    message?: string | null
-  } | null
-}
-
-type PlaceViewClientLike = {
-  signOut: () => Promise<AuthResult>
-}
-
-type ConversationNoticeState = {
-  title: string
-  description: string
-}
-
-function isBenignVideoPlaybackInterruption(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false
-  }
-
-  const message = error.message.toLowerCase()
-
-  return (
-    error.name === 'AbortError' ||
-    message.includes('play() request was interrupted') ||
-    message.includes('media was removed from the document')
-  )
-}
-
-const finderHintOptions = [
-  'Front tables',
-  'Counter',
-  'Window seats',
-  'Patio',
-  'Back corner',
-] as const
-
 async function playFinderCue() {
   if (typeof window !== 'undefined') {
     const AudioContextCtor =
       window.AudioContext ||
-      // Safari.
       ('webkitAudioContext' in window
-        ? ((window as Window & {
-            webkitAudioContext?: typeof AudioContext
-          }).webkitAudioContext ?? null)
+        ? ((window as Window & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext ?? null)
         : null)
 
     if (AudioContextCtor) {
@@ -225,27 +112,19 @@ async function playFinderCue() {
         const audioContext = new AudioContextCtor()
         const oscillator = audioContext.createOscillator()
         const gain = audioContext.createGain()
-
         oscillator.type = 'sine'
         oscillator.frequency.setValueAtTime(880, audioContext.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(
-          1320,
-          audioContext.currentTime + 0.18,
-        )
+        oscillator.frequency.exponentialRampToValueAtTime(1320, audioContext.currentTime + 0.18)
         gain.gain.setValueAtTime(0.0001, audioContext.currentTime)
         gain.gain.exponentialRampToValueAtTime(0.06, audioContext.currentTime + 0.02)
         gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.28)
-
         oscillator.connect(gain)
         gain.connect(audioContext.destination)
         oscillator.start()
         oscillator.stop(audioContext.currentTime + 0.3)
-
-        window.setTimeout(() => {
-          void audioContext.close().catch(() => undefined)
-        }, 450)
+        window.setTimeout(() => void audioContext.close().catch(() => undefined), 450)
       } catch {
-        // Ignore blocked audio contexts and rely on vibration/visual cues.
+        // Ignore blocked audio contexts.
       }
     }
   }
@@ -259,50 +138,35 @@ export function PlaceViewScreen({
   session,
   profile,
   currentPlace,
-  qrHandoff,
   activeConnection,
-  initialScanToken,
+  pendingIncomingRequests,
   refreshSession,
-  clearScanToken,
   setReady,
   saveFinderProfile,
   leavePlace,
   pingParticipant,
-  loadScanPreview,
-  connectScan,
+  sendConnectRequest,
+  respondToRequest,
   endConversation,
   client = authClient,
 }: {
   session: AppSession
   profile: UserProfileState
   currentPlace: CurrentPlaceState
-  qrHandoff: QrHandoffState
   activeConnection: ActiveConnectionState | null
-  initialScanToken: string | null
+  pendingIncomingRequests: IncomingConnectRequest[]
   refreshSession: () => Promise<void>
-  clearScanToken: () => Promise<void>
   setReady: (input: { data: { ready: boolean } }) => Promise<void>
   saveFinderProfile: (input: {
-    data: {
-      isFindable: boolean
-      locationHint: string | null
-    }
+    data: { isFindable: boolean; locationHint: string | null }
   }) => Promise<UserProfileState>
   leavePlace: () => Promise<void>
-  pingParticipant: (input: {
-    data: {
-      userId: string
-    }
+  pingParticipant: (input: { data: { userId: string } }) => Promise<unknown>
+  sendConnectRequest: (input: {
+    data: { recipientUserId: string; introMessage: string }
   }) => Promise<unknown>
-  loadScanPreview: (input: {
-    data: {
-      token: string
-    }
-  }) => Promise<ConnectionPreviewState>
-  connectScan: (input: {
-    data: {
-      token: string
-    }
+  respondToRequest: (input: {
+    data: { requestId: string; accept: boolean }
   }) => Promise<unknown>
   endConversation: () => Promise<unknown>
   client?: PlaceViewClientLike
@@ -313,28 +177,14 @@ export function PlaceViewScreen({
     | 'leave'
     | 'sign-out'
     | 'connect'
+    | 'respond'
     | 'end-connection'
     | null
   >(null)
   const [error, setError] = useState<string | null>(null)
-  const [finderNotice, setFinderNotice] = useState<ConversationNoticeState | null>(
-    null,
-  )
-  const [livePlaceState, setLivePlaceState] = useState<PlaceAgentState | null>(
-    null,
-  )
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
-  const [scannerOpen, setScannerOpen] = useState(false)
-  const [scanInput, setScanInput] = useState('')
-  const [scanPreview, setScanPreview] = useState<ConnectionPreviewState | null>(
-    null,
-  )
-  const [conversationNotice, setConversationNotice] =
-    useState<ConversationNoticeState | null>(null)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [cameraStatus, setCameraStatus] = useState<
-    'idle' | 'starting' | 'scanning' | 'unsupported'
-  >('idle')
+  const [finderNotice, setFinderNotice] = useState<ConversationNoticeState | null>(null)
+  const [livePlaceState, setLivePlaceState] = useState<PlaceAgentState | null>(null)
+  const [conversationNotice, setConversationNotice] = useState<ConversationNoticeState | null>(null)
   const [conversationNow, setConversationNow] = useState(() => Date.now())
   const [pendingPingUserId, setPendingPingUserId] = useState<string | null>(null)
   const [selectedFinderHint, setSelectedFinderHint] = useState(
@@ -344,17 +194,23 @@ export function PlaceViewScreen({
     () => getInitialMotionAccessState(),
   )
   const [motionNotice, setMotionNotice] = useState<string | null>(null)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const scanIntervalRef = useRef<number | null>(null)
-  const resolvingScanRef = useRef(false)
+
+  // Connect request state
+  const [connectModalTarget, setConnectModalTarget] = useState<{
+    userId: string
+    username: string
+    moodEmoji: string | null
+    intentSummary: string | null
+  } | null>(null)
+  const [introMessage, setIntroMessage] = useState('')
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
+
   const readyRequestInFlightRef = useRef(false)
   const motionArmedRef = useRef(false)
   const motionIgnoreUntilRef = useRef(0)
   const faceDownSinceRef = useRef<number | null>(null)
-  const previousConnectionRef = useRef<ActiveConnectionState | null>(
-    activeConnection,
-  )
+  const previousConnectionRef = useRef<ActiveConnectionState | null>(activeConnection)
   const previousPingRef = useRef<string | null>(profile.pingRequestedAt?.toString() ?? null)
 
   const placeAgent = useAgent<PlaceAgent, PlaceAgentState>({
@@ -369,22 +225,20 @@ export function PlaceViewScreen({
   const username =
     session.user.displayUsername || session.user.username || session.user.name
   const liveParticipant =
-    livePlaceState?.participants?.find(
-      (participant) => participant.userId === session.user.id,
-    ) ?? null
+    livePlaceState?.participants?.find((p) => p.userId === session.user.id) ?? null
   const liveConnection =
     livePlaceState?.connections?.find(
-      (connection) =>
-        connection.requesterUserId === session.user.id ||
-        connection.recipientUserId === session.user.id,
+      (c) =>
+        c.requesterUserId === session.user.id ||
+        c.recipientUserId === session.user.id,
     ) ?? null
   const counterpartParticipant =
     liveConnection && livePlaceState
       ? livePlaceState.participants.find(
-          (participant) =>
-            participant.userId !== session.user.id &&
-            (participant.userId === liveConnection.requesterUserId ||
-              participant.userId === liveConnection.recipientUserId),
+          (p) =>
+            p.userId !== session.user.id &&
+            (p.userId === liveConnection.requesterUserId ||
+              p.userId === liveConnection.recipientUserId),
         ) ?? null
       : null
   const liveStatus = liveParticipant?.status ?? profile.status
@@ -417,24 +271,16 @@ export function PlaceViewScreen({
       ? livePlaceState.participants
       : []
   const readyParticipants = [...liveParticipants]
-    .filter((participant) => participant.status === 'ready')
-    .sort((left, right) => {
-      if (left.userId === session.user.id) {
-        return -1
-      }
-
-      if (right.userId === session.user.id) {
-        return 1
-      }
-
-      return left.username.localeCompare(right.username)
+    .filter((p) => p.status === 'ready')
+    .sort((a, b) => {
+      if (a.userId === session.user.id) return -1
+      if (b.userId === session.user.id) return 1
+      return a.username.localeCompare(b.username)
     })
   const findableParticipants = readyParticipants.filter(
-    (participant) => participant.userId !== session.user.id && participant.isFindable,
+    (p) => p.userId !== session.user.id && p.isFindable,
   )
-  const presentParticipants = liveParticipants.filter(
-    (participant) => participant.status === 'present',
-  )
+  const presentParticipants = liveParticipants.filter((p) => p.status === 'present')
   const activeConversationCount =
     livePlaceState?.placeId === currentPlace.place.placeId
       ? livePlaceState.connections.length
@@ -449,10 +295,7 @@ export function PlaceViewScreen({
       : Math.max(currentPlace.readyCount, readyParticipants.length)
   const conversationElapsed =
     resolvedActiveConnection !== null
-      ? formatConversationElapsed(
-          resolvedActiveConnection.createdAt,
-          conversationNow,
-        )
+      ? formatConversationElapsed(resolvedActiveConnection.createdAt, conversationNow)
       : null
 
   useEffect(() => {
@@ -469,13 +312,8 @@ export function PlaceViewScreen({
       setConversationNotice(null)
       return
     }
-
     const previousConnection = previousConnectionRef.current
-
-    if (!previousConnection) {
-      return
-    }
-
+    if (!previousConnection) return
     previousConnectionRef.current = null
     setConversationNotice({
       title: 'Conversation ended',
@@ -487,134 +325,60 @@ export function PlaceViewScreen({
   }, [liveStatus, resolvedActiveConnection])
 
   useEffect(() => {
-    if (!conversationNotice) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setConversationNotice(null)
-    }, 5000)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
+    if (!conversationNotice) return
+    const id = window.setTimeout(() => setConversationNotice(null), 5000)
+    return () => window.clearTimeout(id)
   }, [conversationNotice])
 
   useEffect(() => {
-    if (!finderNotice) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setFinderNotice(null)
-    }, 5000)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
+    if (!finderNotice) return
+    const id = window.setTimeout(() => setFinderNotice(null), 5000)
+    return () => window.clearTimeout(id)
   }, [finderNotice])
 
   useEffect(() => {
-    if (!motionNotice) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setMotionNotice(null)
-    }, 4000)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
+    if (!motionNotice) return
+    const id = window.setTimeout(() => setMotionNotice(null), 4000)
+    return () => window.clearTimeout(id)
   }, [motionNotice])
 
   useEffect(() => {
-    if (!resolvedActiveConnection) {
-      return
-    }
-
+    if (!resolvedActiveConnection) return
     setConversationNow(Date.now())
-
-    const intervalId = window.setInterval(() => {
-      setConversationNow(Date.now())
-    }, 30000)
-
-    return () => {
-      window.clearInterval(intervalId)
-    }
+    const id = window.setInterval(() => setConversationNow(Date.now()), 30000)
+    return () => window.clearInterval(id)
   }, [resolvedActiveConnection?.id])
 
   useEffect(() => {
-    if (locationHint) {
-      setSelectedFinderHint(locationHint)
-    }
+    if (locationHint) setSelectedFinderHint(locationHint)
   }, [locationHint])
 
   useEffect(() => {
     const nextPingValue = activePingRequestedAt?.toString() ?? null
-
-    if (!nextPingValue || previousPingRef.current === nextPingValue) {
-      return
-    }
-
+    if (!nextPingValue || previousPingRef.current === nextPingValue) return
     previousPingRef.current = nextPingValue
-
     const pingTimestamp = new Date(nextPingValue).getTime()
-
-    if (!Number.isFinite(pingTimestamp) || Date.now() - pingTimestamp > 15000) {
-      return
-    }
-
+    if (!Number.isFinite(pingTimestamp) || Date.now() - pingTimestamp > 15000) return
     setFinderNotice({
       title: 'Someone is trying to find you',
       description: activePingRequestedByUsername
-        ? `${activePingRequestedByUsername} asked for a quick cue. Keep your QR ready when they arrive.`
-        : 'Someone nearby asked for a quick cue. Keep your QR ready when they arrive.',
+        ? `${activePingRequestedByUsername} is looking for you. Head over when you're ready.`
+        : 'Someone nearby is looking for you.',
     })
     void playFinderCue()
   }, [activePingRequestedAt, activePingRequestedByUsername])
-
-  useEffect(() => {
-    let cancelled = false
-
-    void QRCode.toDataURL(qrHandoff.url, {
-      margin: 1,
-      width: 512,
-      color: {
-        dark: '#123f35',
-        light: '#f8fcf8',
-      },
-    }).then((nextQrDataUrl: string) => {
-      if (!cancelled) {
-        setQrDataUrl(nextQrDataUrl)
-      }
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [qrHandoff.url])
 
   const updateReadyState = async (
     nextReady: boolean,
     source: 'manual' | 'face-down' = 'manual',
   ) => {
-    if (readyRequestInFlightRef.current || nextReady === isReady) {
-      return
-    }
-
+    if (readyRequestInFlightRef.current || nextReady === isReady) return
     readyRequestInFlightRef.current = true
     setPendingAction('ready')
     setError(null)
-
     try {
-      await setReady({
-        data: {
-          ready: nextReady,
-        },
-      })
+      await setReady({ data: { ready: nextReady } })
       await refreshSession()
-
       if (source === 'face-down') {
         setMotionNotice('Phone turned face-down. You are no longer marked ready.')
       }
@@ -628,9 +392,7 @@ export function PlaceViewScreen({
     } finally {
       readyRequestInFlightRef.current = false
       motionArmedRef.current = false
-      motionIgnoreUntilRef.current = nextReady
-        ? Date.now() + MOTION_ARM_DELAY_MS
-        : 0
+      motionIgnoreUntilRef.current = nextReady ? Date.now() + MOTION_ARM_DELAY_MS : 0
       faceDownSinceRef.current = null
       setPendingAction(null)
     }
@@ -642,206 +404,43 @@ export function PlaceViewScreen({
       faceDownSinceRef.current = null
       return
     }
-
     const now = Date.now()
     const isFaceDown = isFaceDownReading(event.accelerationIncludingGravity)
-
     if (now < motionIgnoreUntilRef.current) {
       faceDownSinceRef.current = null
       return
     }
-
     if (!motionArmedRef.current) {
-      if (!isFaceDown) {
-        motionArmedRef.current = true
-      }
-
+      if (!isFaceDown) motionArmedRef.current = true
       faceDownSinceRef.current = null
       return
     }
-
     if (!isFaceDown) {
       faceDownSinceRef.current = null
       return
     }
-
     if (faceDownSinceRef.current === null) {
       faceDownSinceRef.current = now
       return
     }
-
-    if (now - faceDownSinceRef.current < FACE_DOWN_HOLD_MS) {
-      return
-    }
-
+    if (now - faceDownSinceRef.current < FACE_DOWN_HOLD_MS) return
     faceDownSinceRef.current = null
     void updateReadyState(false, 'face-down')
   })
 
   useEffect(() => {
-    if (
-      !isReady ||
-      isInConversation ||
-      motionAccessState !== 'active' ||
-      typeof window === 'undefined'
-    ) {
+    if (!isReady || isInConversation || motionAccessState !== 'active' || typeof window === 'undefined') {
       motionArmedRef.current = false
       motionIgnoreUntilRef.current = 0
       faceDownSinceRef.current = null
       return
     }
-
     motionArmedRef.current = false
     motionIgnoreUntilRef.current = Date.now() + MOTION_ARM_DELAY_MS
     faceDownSinceRef.current = null
-
     window.addEventListener('devicemotion', handleDeviceMotion)
-
-    return () => {
-      window.removeEventListener('devicemotion', handleDeviceMotion)
-    }
+    return () => window.removeEventListener('devicemotion', handleDeviceMotion)
   }, [isReady, isInConversation, motionAccessState])
-
-  const stopScanner = () => {
-    if (scanIntervalRef.current !== null) {
-      window.clearInterval(scanIntervalRef.current)
-      scanIntervalRef.current = null
-    }
-
-    if (videoRef.current) {
-      videoRef.current.pause()
-      videoRef.current.srcObject = null
-    }
-
-    streamRef.current?.getTracks().forEach((track) => {
-      track.stop()
-    })
-    streamRef.current = null
-    setCameraStatus('idle')
-  }
-
-  const resolveToken = async (rawValue: string) => {
-    const token = extractScanToken(rawValue)
-
-    if (!token || resolvingScanRef.current) {
-      return
-    }
-
-    resolvingScanRef.current = true
-    setScanError(null)
-
-    try {
-      const preview = await loadScanPreview({
-        data: {
-          token,
-        },
-      })
-      setScanInput(rawValue)
-      setScanPreview(preview)
-      stopScanner()
-    } catch (nextError) {
-      setScanPreview(null)
-      setScanError(
-        nextError instanceof Error
-          ? nextError.message
-          : 'Unable to read that QR code right now.',
-      )
-    } finally {
-      resolvingScanRef.current = false
-    }
-  }
-
-  useEffect(() => {
-    if (!initialScanToken) {
-      return
-    }
-
-    setScannerOpen(true)
-    void resolveToken(initialScanToken)
-  }, [initialScanToken])
-
-  useEffect(() => {
-    if (!scannerOpen || scanPreview || isInConversation) {
-      return
-    }
-
-    if (!navigator.mediaDevices?.getUserMedia || typeof window === 'undefined') {
-      setCameraStatus('unsupported')
-      return
-    }
-
-    const detector = createQrFrameDetector()
-
-    if (!detector) {
-      setCameraStatus('unsupported')
-      return
-    }
-
-    let cancelled = false
-
-    const startScanner = async () => {
-      setCameraStatus('starting')
-      setScanError(null)
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: {
-              ideal: 'environment',
-            },
-          },
-        })
-
-        if (cancelled || !videoRef.current) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-
-        streamRef.current = stream
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
-
-        if (cancelled || videoRef.current?.srcObject !== stream) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-
-        setCameraStatus('scanning')
-        scanIntervalRef.current = window.setInterval(() => {
-          if (!videoRef.current || resolvingScanRef.current) {
-            return
-          }
-
-          void detector
-            .detect(videoRef.current)
-            .then((rawValue) => {
-              if (rawValue) {
-                void resolveToken(rawValue)
-              }
-            })
-            .catch(() => undefined)
-        }, 500)
-      } catch (nextError) {
-        if (cancelled || isBenignVideoPlaybackInterruption(nextError)) {
-          return
-        }
-
-        setCameraStatus('unsupported')
-        setScanError(
-          nextError instanceof Error
-            ? nextError.message
-            : 'Unable to start the camera right now.',
-        )
-      }
-    }
-
-    void startScanner()
-
-    return () => {
-      cancelled = true
-      stopScanner()
-    }
-  }, [scannerOpen, scanPreview, isInConversation])
 
   const handleReadyToggle = async () => {
     await updateReadyState(!isReady)
@@ -850,15 +449,12 @@ export function PlaceViewScreen({
   const handleLeavePlace = async () => {
     setPendingAction('leave')
     setError(null)
-
     try {
       await leavePlace()
       await refreshSession()
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : 'Unable to switch places right now.',
+        nextError instanceof Error ? nextError.message : 'Unable to switch places right now.',
       )
     } finally {
       setPendingAction(null)
@@ -868,14 +464,8 @@ export function PlaceViewScreen({
   const saveFinderState = async (nextIsFindable: boolean, nextLocationHint: string) => {
     setPendingAction('finder')
     setError(null)
-
     try {
-      await saveFinderProfile({
-        data: {
-          isFindable: nextIsFindable,
-          locationHint: nextLocationHint,
-        },
-      })
+      await saveFinderProfile({ data: { isFindable: nextIsFindable, locationHint: nextLocationHint } })
       await refreshSession()
       setFinderNotice({
         title: nextIsFindable ? 'Finder mode is on' : 'Finder mode is off',
@@ -900,122 +490,26 @@ export function PlaceViewScreen({
 
   const handleSelectFinderHint = async (nextHint: string) => {
     setSelectedFinderHint(nextHint)
-
-    if (!isFindable) {
-      return
-    }
-
+    if (!isFindable) return
     await saveFinderState(true, nextHint)
   }
 
   const handleSignOut = async () => {
     setPendingAction('sign-out')
     setError(null)
-
     const result = await client.signOut()
-
     if (result.error) {
       setError(result.error.message || 'Unable to sign out right now.')
       setPendingAction(null)
       return
     }
-
     await refreshSession()
     setPendingAction(null)
-  }
-
-  const handleOpenScanner = async () => {
-    setScannerOpen(true)
-    setScanPreview(null)
-    setScanError(null)
-    setScanInput('')
-    await clearScanToken()
-  }
-
-  const handleCloseScanner = async () => {
-    stopScanner()
-    setScannerOpen(false)
-    setScanPreview(null)
-    setScanError(null)
-    setScanInput('')
-    await clearScanToken()
-  }
-
-  const handleResolveManualScan = async () => {
-    await resolveToken(scanInput)
-  }
-
-  const handleEnableMotionAccess = async () => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const motionEvent = window.DeviceMotionEvent as
-      | DeviceMotionEventWithPermission
-      | undefined
-
-    if (!motionEvent) {
-      setMotionAccessState('unavailable')
-      return
-    }
-
-    if (!motionEvent.requestPermission) {
-      setMotionAccessState('active')
-      motionArmedRef.current = false
-      motionIgnoreUntilRef.current = Date.now() + MOTION_ARM_DELAY_MS
-      return
-    }
-
-    setMotionAccessState('requesting')
-
-    try {
-      const permission = await motionEvent.requestPermission()
-
-      if (permission === 'granted') {
-        setMotionAccessState('active')
-        motionArmedRef.current = false
-        motionIgnoreUntilRef.current = Date.now() + MOTION_ARM_DELAY_MS
-        setMotionNotice('Flip your phone face-down to leave the ready pool.')
-        return
-      }
-
-      setMotionAccessState('denied')
-    } catch {
-      setMotionAccessState('denied')
-    }
-  }
-
-  const handleConnect = async () => {
-    if (!scanPreview) {
-      return
-    }
-
-    setPendingAction('connect')
-    setError(null)
-
-    try {
-      await connectScan({
-        data: {
-          token: scanPreview.token,
-        },
-      })
-      await handleCloseScanner()
-      await refreshSession()
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : 'Unable to start that connection right now.',
-      )
-    } finally {
-      setPendingAction(null)
-    }
   }
 
   const handleEndConnection = async () => {
     setPendingAction('end-connection')
     setError(null)
-
     try {
       await endConversation()
       await refreshSession()
@@ -1030,28 +524,113 @@ export function PlaceViewScreen({
     }
   }
 
-  const handlePingParticipant = async (participant: PlaceAgentState['participants'][number]) => {
+  const handlePingParticipant = async (
+    participant: PlaceAgentState['participants'][number],
+  ) => {
     setPendingPingUserId(participant.userId)
     setError(null)
-
     try {
-      await pingParticipant({
-        data: {
-          userId: participant.userId,
-        },
-      })
+      await pingParticipant({ data: { userId: participant.userId } })
       setFinderNotice({
         title: 'Ping sent',
         description: `A quick cue was sent to ${participant.username} near ${participant.locationHint || 'their shared spot'}.`,
       })
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : 'Unable to send that ping right now.',
+        nextError instanceof Error ? nextError.message : 'Unable to send that ping right now.',
       )
     } finally {
       setPendingPingUserId(null)
+    }
+  }
+
+  const handleEnableMotionAccess = async () => {
+    if (typeof window === 'undefined') return
+    const motionEvent = window.DeviceMotionEvent as DeviceMotionEventWithPermission | undefined
+    if (!motionEvent) {
+      setMotionAccessState('unavailable')
+      return
+    }
+    if (!motionEvent.requestPermission) {
+      setMotionAccessState('active')
+      motionArmedRef.current = false
+      motionIgnoreUntilRef.current = Date.now() + MOTION_ARM_DELAY_MS
+      return
+    }
+    setMotionAccessState('requesting')
+    try {
+      const permission = await motionEvent.requestPermission()
+      if (permission === 'granted') {
+        setMotionAccessState('active')
+        motionArmedRef.current = false
+        motionIgnoreUntilRef.current = Date.now() + MOTION_ARM_DELAY_MS
+        setMotionNotice('Flip your phone face-down to leave the ready pool.')
+        return
+      }
+      setMotionAccessState('denied')
+    } catch {
+      setMotionAccessState('denied')
+    }
+  }
+
+  // Connect request handlers
+  const handleOpenConnectModal = (participant: PlaceAgentState['participants'][number]) => {
+    setConnectModalTarget({
+      userId: participant.userId,
+      username: participant.username,
+      moodEmoji: participant.moodEmoji,
+      intentSummary: participant.intentSummary,
+    })
+    setIntroMessage('')
+    setConnectError(null)
+  }
+
+  const handleCloseConnectModal = () => {
+    setConnectModalTarget(null)
+    setIntroMessage('')
+    setConnectError(null)
+  }
+
+  const handleSendConnectRequest = async () => {
+    if (!connectModalTarget) return
+    setPendingAction('connect')
+    setConnectError(null)
+    try {
+      await sendConnectRequest({
+        data: {
+          recipientUserId: connectModalTarget.userId,
+          introMessage,
+        },
+      })
+      handleCloseConnectModal()
+      await refreshSession()
+    } catch (nextError) {
+      setConnectError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to send that request right now.',
+      )
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const handleRespondToRequest = async (requestId: string, accept: boolean) => {
+    setRespondingRequestId(requestId)
+    setPendingAction('respond')
+    setError(null)
+    try {
+      await respondToRequest({ data: { requestId, accept } })
+      await refreshSession()
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to respond to that request right now.',
+      )
+    } finally {
+      setRespondingRequestId(null)
+      setPendingAction(null)
     }
   }
 
@@ -1068,8 +647,8 @@ export function PlaceViewScreen({
             {currentPlace.place.name}
           </h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-[var(--rt-ink-soft)] sm:text-lg">
-            You are here as {username}. Watch the room, go ready when you want,
-            and share your QR when a nearby conversation feels right.
+            You are here as {username}. Go ready when you want to meet someone,
+            then send a connect request to start the conversation.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -1088,13 +667,7 @@ export function PlaceViewScreen({
             <MetricCard
               icon={<MapPin className="h-5 w-5" />}
               label="Your state"
-              value={
-                isInConversation
-                  ? 'Talking'
-                  : isReady
-                    ? 'Ready'
-                    : 'Present'
-              }
+              value={isInConversation ? 'Talking' : isReady ? 'Ready' : 'Present'}
               tone={isInConversation ? 'amber' : isReady ? 'emerald' : 'slate'}
             />
           </div>
@@ -1111,6 +684,40 @@ export function PlaceViewScreen({
             </p>
           </div>
 
+          {/* Incoming connect requests */}
+          {pendingIncomingRequests.length > 0 ? (
+            <div className="mt-6 rounded-[2rem] border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] p-5 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl border border-[var(--rt-accent)] bg-white p-3 text-[var(--rt-accent)]">
+                  <MessageCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[var(--rt-ink)]">
+                    {pendingIncomingRequests.length === 1
+                      ? '1 connect request'
+                      : `${pendingIncomingRequests.length} connect requests`}
+                  </p>
+                  <p className="text-sm leading-6 text-[var(--rt-ink-soft)]">
+                    Someone wants to meet you. Accept or decline below.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {pendingIncomingRequests.map((req) => (
+                  <IncomingRequestCard
+                    key={req.id}
+                    request={req}
+                    isResponding={respondingRequestId === req.id}
+                    onAccept={() => void handleRespondToRequest(req.id, true)}
+                    onReject={() => void handleRespondToRequest(req.id, false)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* Who is ready here */}
           <div className="mt-6 rounded-[2rem] border border-[var(--rt-border)] bg-white/82 p-6 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -1118,7 +725,7 @@ export function PlaceViewScreen({
                   Who is ready here
                 </p>
                 <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  You can see who is open to a conversation before you scan.
+                  Tap Connect on someone to send them an intro and start the conversation.
                 </p>
               </div>
               <div className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-sm font-semibold text-[var(--rt-accent)]">
@@ -1132,16 +739,17 @@ export function PlaceViewScreen({
                   <PresencePersonCard
                     key={participant.userId}
                     participant={participant}
-                    username={participant.username}
-                    moodEmoji={participant.moodEmoji}
-                    intentSummary={participant.intentSummary}
                     isCurrentUser={participant.userId === session.user.id}
+                    isInConversation={isInConversation}
+                    onConnect={
+                      participant.userId === session.user.id || isInConversation
+                        ? null
+                        : () => handleOpenConnectModal(participant)
+                    }
                     onPing={
                       participant.userId === session.user.id || !participant.isFindable
                         ? null
-                        : () => {
-                            void handlePingParticipant(participant)
-                          }
+                        : () => void handlePingParticipant(participant)
                     }
                     isPinging={pendingPingUserId === participant.userId}
                   />
@@ -1198,9 +806,9 @@ export function PlaceViewScreen({
             <p className="text-sm font-semibold text-[var(--rt-ink)]">Status</p>
             <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
               {isInConversation
-                ? `You are currently talking${resolvedActiveConnection ? ` with ${resolvedActiveConnection.counterpart.username}` : ''}, so your QR and ready state are paused.`
+                ? `You are currently talking${resolvedActiveConnection ? ` with ${resolvedActiveConnection.counterpart.username}` : ''}.`
                 : isReady
-                ? 'You are visible in the ready count for this place.'
+                ? 'You are visible in the ready count. Others can send you a connect request.'
                 : 'You are present here, but not yet in the ready count.'}
             </p>
 
@@ -1211,9 +819,7 @@ export function PlaceViewScreen({
                 disabled={pendingAction === 'end-connection'}
                 className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {pendingAction === 'end-connection'
-                  ? 'Ending conversation...'
-                  : 'I am free again'}
+                {pendingAction === 'end-connection' ? 'Ending conversation...' : 'I am free again'}
               </button>
             ) : (
               <button
@@ -1229,27 +835,24 @@ export function PlaceViewScreen({
                 {pendingAction === 'ready'
                   ? 'Updating status...'
                   : isReady
-                    ? 'Leave ready pool'
-                    : 'Set me ready'}
+                  ? 'Leave ready pool'
+                  : 'Set me ready'}
               </button>
             )}
 
             {!isInConversation ? (
               <div className="mt-4 rounded-2xl border border-dashed border-[var(--rt-border)] bg-white px-4 py-4">
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                  Phone flip shortcut
-                </p>
+                <p className="text-sm font-semibold text-[var(--rt-ink)]">Phone flip shortcut</p>
                 <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
                   {motionAccessState === 'active'
                     ? isReady
                       ? 'Flip your phone face-down for a moment to leave the ready pool without tapping.'
-                      : 'When you are ready, flipping your phone face-down can take you back out of the ready pool without tapping.'
-                    : motionAccessState === 'needs-permission' ||
-                        motionAccessState === 'requesting'
-                      ? 'Allow motion access once so turning your phone face-down can quietly take you out of the ready pool.'
-                      : motionAccessState === 'denied'
-                        ? 'Motion access is still off, so face-down detection cannot change your status yet.'
-                        : 'Face-down detection is not available in this browser.'}
+                      : 'When you are ready, flipping your phone face-down can take you back out of the ready pool.'
+                    : motionAccessState === 'needs-permission' || motionAccessState === 'requesting'
+                    ? 'Allow motion access once so turning your phone face-down can quietly take you out of the ready pool.'
+                    : motionAccessState === 'denied'
+                    ? 'Motion access is still off, so face-down detection cannot change your status yet.'
+                    : 'Face-down detection is not available in this browser.'}
                 </p>
 
                 {(motionAccessState === 'needs-permission' ||
@@ -1257,24 +860,20 @@ export function PlaceViewScreen({
                   motionAccessState === 'denied') && (
                   <button
                     type="button"
-                    onClick={() => {
-                      void handleEnableMotionAccess()
-                    }}
+                    onClick={() => void handleEnableMotionAccess()}
                     disabled={motionAccessState === 'requesting'}
                     className="mt-4 inline-flex items-center justify-center rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {motionAccessState === 'requesting'
                       ? 'Enabling motion access...'
                       : motionAccessState === 'denied'
-                        ? 'Try motion access again'
-                        : 'Enable face-down shortcut'}
+                      ? 'Try motion access again'
+                      : 'Enable face-down shortcut'}
                   </button>
                 )}
 
                 {motionNotice ? (
-                  <p className="mt-3 text-sm font-medium text-[var(--rt-accent)]">
-                    {motionNotice}
-                  </p>
+                  <p className="mt-3 text-sm font-medium text-[var(--rt-accent)]">{motionNotice}</p>
                 ) : null}
               </div>
             ) : null}
@@ -1283,9 +882,7 @@ export function PlaceViewScreen({
           {conversationNotice ? (
             <div className="mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5 text-[var(--rt-ink)]">
               <p className="text-sm font-semibold">{conversationNotice.title}</p>
-              <p className="mt-2 text-sm leading-6">
-                {conversationNotice.description}
-              </p>
+              <p className="mt-2 text-sm leading-6">{conversationNotice.description}</p>
             </div>
           ) : null}
 
@@ -1302,12 +899,9 @@ export function PlaceViewScreen({
                 <LocateFixed className="h-6 w-6" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                  Help someone find you
-                </p>
+                <p className="text-sm font-semibold text-[var(--rt-ink)]">Help someone find you</p>
                 <p className="text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Share one simple spot in this place, then let someone nearby
-                  send a quick cue before they scan your QR.
+                  Share one simple spot in this place so someone can look for you before connecting.
                 </p>
               </div>
             </div>
@@ -1315,14 +909,11 @@ export function PlaceViewScreen({
             <div className="mt-5 flex flex-wrap gap-2">
               {finderHintOptions.map((hint) => {
                 const isSelected = selectedFinderHint === hint
-
                 return (
                   <button
                     key={hint}
                     type="button"
-                    onClick={() => {
-                      void handleSelectFinderHint(hint)
-                    }}
+                    onClick={() => void handleSelectFinderHint(hint)}
                     disabled={!isReady || isInConversation || pendingAction === 'finder'}
                     className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                       isSelected
@@ -1341,10 +932,10 @@ export function PlaceViewScreen({
                 {isFindable
                   ? `Currently sharing: ${selectedFinderHint}`
                   : isInConversation
-                    ? 'Finder mode pauses while you are talking.'
-                    : isReady
-                      ? 'Pick the spot that best matches where you are.'
-                      : 'Set yourself ready before sharing a spot.'}
+                  ? 'Finder mode pauses while you are talking.'
+                  : isReady
+                  ? 'Pick the spot that best matches where you are.'
+                  : 'Set yourself ready before sharing a spot.'}
               </p>
               <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
                 {isFindable
@@ -1355,9 +946,7 @@ export function PlaceViewScreen({
 
             <button
               type="button"
-              onClick={() => {
-                void handleFinderToggle()
-              }}
+              onClick={() => void handleFinderToggle()}
               disabled={!isReady || isInConversation || pendingAction === 'finder'}
               className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${
                 isFindable
@@ -1368,53 +957,9 @@ export function PlaceViewScreen({
               {pendingAction === 'finder'
                 ? 'Saving finder settings...'
                 : isFindable
-                  ? 'Stop sharing my spot'
-                  : 'Help someone find me'}
+                ? 'Stop sharing my spot'
+                : 'Help someone find me'}
             </button>
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-5">
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl border border-[var(--rt-border)] bg-white p-3 text-[var(--rt-accent)]">
-                <QrCode className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">Your QR</p>
-                <p className="text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Nearby people can scan this to preview you, then confirm
-                  before they connect.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-3xl border border-[var(--rt-border)] bg-white px-4 py-6 text-center">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`TalkToMe QR for ${username}`}
-                  className={`mx-auto h-48 w-48 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-3 ${
-                    liveStatus === 'ready' ? '' : 'opacity-40'
-                  }`}
-                />
-              ) : (
-                <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-3xl border border-dashed border-[var(--rt-border-strong)] text-sm text-[var(--rt-ink-soft)]">
-                  Building QR...
-                </div>
-              )}
-
-              <div
-                className={`mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${
-                  qrHandoff.isActive
-                    ? 'bg-[var(--rt-accent-soft)] text-[var(--rt-accent)]'
-                    : 'bg-[var(--rt-bg-strong)] text-[var(--rt-ink-soft)]'
-                }`}
-              >
-                <Check className="h-4 w-4" />
-                {liveStatus === 'ready'
-                  ? 'Live while you are ready'
-                  : 'Set yourself ready to make this live'}
-              </div>
-            </div>
           </div>
 
           {resolvedActiveConnection ? (
@@ -1438,22 +983,13 @@ export function PlaceViewScreen({
                 {resolvedActiveConnection.counterpart.intentSummary}
               </p>
               <p className="mt-3 text-sm leading-6 text-[var(--rt-accent)]/80">
-                Take your time. Either person can end the conversation, and you
-                will both return to ready automatically.
+                Take your time. Either person can end the conversation, and you will
+                both return to ready automatically.
               </p>
             </div>
           ) : null}
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <button
-              type="button"
-              onClick={handleOpenScanner}
-              disabled={isInConversation}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <ScanLine className="h-4 w-4" />
-              Scan someone nearby
-            </button>
             <button
               type="button"
               onClick={handleLeavePlace}
@@ -1473,127 +1009,81 @@ export function PlaceViewScreen({
         </section>
       </div>
 
-      {scannerOpen ? (
+      {/* Connect request modal */}
+      {connectModalTarget ? (
         <div className="fixed inset-0 z-50 flex items-end bg-[rgba(17,52,44,0.55)] sm:items-center sm:justify-center">
           <div className="w-full max-w-xl rounded-t-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-6 shadow-[0_24px_80px_rgba(17,52,44,0.22)] sm:rounded-[2rem] sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm uppercase tracking-[0.24em] text-[var(--rt-accent)]">
-                  Scan QR
+                  Send a request
                 </p>
                 <h3 className="mt-2 text-2xl font-bold text-[var(--rt-ink)]">
-                  Understand, then connect
+                  Introduce yourself
                 </h3>
               </div>
-
               <button
                 type="button"
-                onClick={() => {
-                  void handleCloseScanner()
-                }}
+                onClick={handleCloseConnectModal}
                 className="rounded-full border border-[var(--rt-border)] p-2 text-[var(--rt-ink-soft)] transition hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)]"
-                aria-label="Close scanner"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            {scanPreview ? (
-              <div className="mt-6 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] p-5">
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                  You are about to connect with
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-[var(--rt-ink)]">
-                  {scanPreview.counterpart.username}
-                </p>
-                <p className="mt-3 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  {scanPreview.counterpart.moodEmoji}{' '}
-                  {scanPreview.counterpart.intentSummary}
-                </p>
-                <p className="mt-3 text-sm text-[var(--rt-ink-soft)]">
-                  {scanPreview.placeName}
-                </p>
+            <div className="mt-5 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] p-4">
+              <p className="text-sm font-semibold text-[var(--rt-ink)]">
+                {connectModalTarget.username}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
+                {connectModalTarget.moodEmoji} {connectModalTarget.intentSummary || 'Open to a nearby conversation.'}
+              </p>
+            </div>
 
-                <div className="mt-5 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={handleConnect}
-                    disabled={pendingAction === 'connect'}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {pendingAction === 'connect'
-                      ? 'Connecting...'
-                      : 'Start conversation'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setScanPreview(null)
-                      setScanInput('')
-                    }}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)]"
-                  >
-                    Scan another
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="mt-6 overflow-hidden rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent)]">
-                  {cameraStatus === 'unsupported' ? (
-                    <div className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 py-10 text-center text-white/85">
-                      <Camera className="h-8 w-8" />
-                      <p className="max-w-sm text-sm leading-6">
-                        In-app camera scanning is not available here. Scan the QR
-                        with your phone camera or paste the link below.
-                      </p>
-                    </div>
-                  ) : (
-                    <video
-                      ref={videoRef}
-                      muted
-                      playsInline
-                      className="aspect-[4/5] w-full object-cover"
-                    />
-                  )}
-                </div>
+            <div className="mt-5">
+              <label>
+                <span className="mb-2 block text-sm font-semibold text-[var(--rt-ink)]">
+                  Your intro message
+                </span>
+                <p className="mb-3 text-sm leading-6 text-[var(--rt-ink-soft)]">
+                  Keep it genuine. {connectModalTarget.username} will use this to decide whether to meet you.
+                </p>
+                <textarea
+                  value={introMessage}
+                  onChange={(e) => setIntroMessage(e.target.value)}
+                  rows={3}
+                  maxLength={280}
+                  placeholder={`Hi, I noticed you're open to a conversation. I'd love to chat about...`}
+                  className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
+                />
+              </label>
+            </div>
 
-                <div className="mt-4 rounded-3xl border border-[var(--rt-border)] bg-white p-5">
-                  <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                    {cameraStatus === 'starting'
-                      ? 'Starting camera...'
-                      : cameraStatus === 'scanning'
-                        ? 'Point your camera at their QR code.'
-                        : 'Paste a scan link or token'}
-                  </p>
-
-                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <input
-                      type="text"
-                      value={scanInput}
-                      onChange={(event) => setScanInput(event.target.value)}
-                      placeholder="https://talktome-app.haarsh-shahh.workers.dev/?scan=..."
-                      className="w-full rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-sm text-[var(--rt-ink)] outline-none transition focus:border-[var(--rt-accent-strong)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleResolveManualScan()
-                      }}
-                      className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)]"
-                    >
-                      Preview
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {scanError ? (
+            {connectError ? (
               <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {scanError}
+                {connectError}
               </div>
             ) : null}
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => void handleSendConnectRequest()}
+                disabled={pendingAction === 'connect' || !introMessage.trim()}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Send className="h-4 w-4" />
+                {pendingAction === 'connect' ? 'Sending...' : 'Send request'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseConnectModal}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)]"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1614,8 +1104,7 @@ function MetricCard({
 }) {
   const styles = {
     amber: 'border-[var(--rt-border)] bg-[var(--rt-accent-soft)] text-[var(--rt-accent)]',
-    emerald:
-      'border-[var(--rt-border)] bg-[color:rgba(27,141,109,0.12)] text-[#0b5d49]',
+    emerald: 'border-[var(--rt-border)] bg-[color:rgba(27,141,109,0.12)] text-[#0b5d49]',
     slate: 'border-[var(--rt-border)] bg-white text-[var(--rt-ink)]',
   }[tone]
 
@@ -1630,20 +1119,77 @@ function MetricCard({
   )
 }
 
+function IncomingRequestCard({
+  request,
+  isResponding,
+  onAccept,
+  onReject,
+}: {
+  request: IncomingConnectRequest
+  isResponding: boolean
+  onAccept: () => void
+  onReject: () => void
+}) {
+  return (
+    <div className="rounded-3xl border border-[var(--rt-border)] bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-[var(--rt-ink)]">
+            {request.requester.username}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-[var(--rt-ink-soft)]">
+            {request.requester.moodEmoji} {request.requester.intentSummary || 'Open to a nearby conversation.'}
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
+          Request
+        </span>
+      </div>
+
+      {request.introMessage ? (
+        <div className="mt-3 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3">
+          <p className="text-sm leading-6 text-[var(--rt-ink)]">
+            "{request.introMessage}"
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex gap-3">
+        <button
+          type="button"
+          onClick={onAccept}
+          disabled={isResponding}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          <Check className="h-4 w-4" />
+          {isResponding ? 'Accepting...' : 'Accept'}
+        </button>
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={isResponding}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          <X className="h-4 w-4" />
+          Decline
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PresencePersonCard({
   participant,
-  username,
-  moodEmoji,
-  intentSummary,
   isCurrentUser,
+  isInConversation,
+  onConnect,
   onPing,
   isPinging,
 }: {
   participant: PlaceAgentState['participants'][number]
-  username: string
-  moodEmoji: string | null
-  intentSummary: string | null
   isCurrentUser: boolean
+  isInConversation: boolean
+  onConnect: (() => void) | null
   onPing: (() => void) | null
   isPinging: boolean
 }) {
@@ -1652,7 +1198,7 @@ function PresencePersonCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-[var(--rt-ink)]">
-            {username}
+            {participant.username}
             {isCurrentUser ? (
               <span className="ml-2 rounded-full bg-[var(--rt-accent)] px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-white">
                 You
@@ -1660,7 +1206,7 @@ function PresencePersonCard({
             ) : null}
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-            {moodEmoji} {intentSummary || 'Open to a nearby conversation.'}
+            {participant.moodEmoji} {participant.intentSummary || 'Open to a nearby conversation.'}
           </p>
           {participant.isFindable && participant.locationHint ? (
             <p className="mt-2 text-sm font-medium text-[var(--rt-accent)]">
@@ -1672,6 +1218,16 @@ function PresencePersonCard({
           <span className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
             {participant.isFindable ? 'Findable' : 'Ready'}
           </span>
+          {onConnect && !isCurrentUser ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--rt-accent-strong)]"
+            >
+              <Send className="h-3 w-3" />
+              Connect
+            </button>
+          ) : null}
           {onPing ? (
             <button
               type="button"
@@ -1701,35 +1257,17 @@ function PresenceSummaryCard({
   return (
     <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4">
       <p className="text-sm font-semibold text-[var(--rt-ink)]">{label}</p>
-      <p className="mt-2 text-3xl font-black tracking-[-0.04em] text-[var(--rt-ink)]">
-        {count}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-        {description}
-      </p>
+      <p className="mt-2 text-3xl font-black tracking-[-0.04em] text-[var(--rt-ink)]">{count}</p>
+      <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">{description}</p>
     </div>
   )
 }
 
-function formatConversationElapsed(
-  createdAt: string | Date,
-  now: number,
-) {
+function formatConversationElapsed(createdAt: string | Date, now: number) {
   const startedAt = new Date(createdAt).getTime()
-
-  if (!Number.isFinite(startedAt)) {
-    return null
-  }
-
+  if (!Number.isFinite(startedAt)) return null
   const elapsedMinutes = Math.max(0, Math.floor((now - startedAt) / 60000))
-
-  if (elapsedMinutes < 1) {
-    return 'Started now'
-  }
-
-  if (elapsedMinutes === 1) {
-    return '1 min in'
-  }
-
+  if (elapsedMinutes < 1) return 'Started now'
+  if (elapsedMinutes === 1) return '1 min in'
   return `${elapsedMinutes} min in`
 }

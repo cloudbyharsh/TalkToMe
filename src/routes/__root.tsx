@@ -48,7 +48,7 @@ function PostHogInit() {
   }, [])
   return null
 }
-
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">

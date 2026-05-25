@@ -5,21 +5,18 @@ import { posthog } from './__root'
 import { AuthScreen } from '../components/AuthScreen'
 import { OnboardingScreen } from '../components/OnboardingScreen'
 import { PlaceViewScreen } from '../components/PlaceViewScreen'
-import { ScanJoinScreen } from '../components/ScanJoinScreen'
 import {
-  connectFromScan,
   endCurrentConnection,
   getAppState,
   getNearbyPlacePreview,
   leaveCurrentPlace,
-  joinPlaceAndConnectFromScan,
   pingFindableUser,
-  previewScanJoin,
-  resolveScanToken,
+  respondToConnectRequest,
   saveFinderProfile,
   saveUserProfile,
-  setReadyState,
   searchNearbyPlacesForLocation,
+  sendConnectRequest,
+  setReadyState,
 } from '../lib/server/app-state'
 
 const loadAppState = createServerFn({ method: 'GET' }).handler(async () => {
@@ -27,9 +24,7 @@ const loadAppState = createServerFn({ method: 'GET' }).handler(async () => {
 })
 
 const searchNearbyPlaces = createServerFn({ method: 'POST' })
-  .inputValidator(
-    (input: { latitude: number; longitude: number }) => input,
-  )
+  .inputValidator((input: { latitude: number; longitude: number }) => input)
   .handler(async ({ data }) => {
     return searchNearbyPlacesForLocation(data)
   })
@@ -42,11 +37,7 @@ const loadNearbyPlacePreview = createServerFn({ method: 'POST' })
 
 const upsertUserProfile = createServerFn({ method: 'POST' })
   .inputValidator(
-    (input: {
-      moodEmoji: string
-      intentText: string
-      currentPlaceId: string
-    }) => input,
+    (input: { moodEmoji: string; intentText: string; currentPlaceId: string }) => input,
   )
   .handler(async ({ data }) => {
     return saveUserProfile(data)
@@ -59,9 +50,7 @@ const updateReadyState = createServerFn({ method: 'POST' })
   })
 
 const updateFinderProfile = createServerFn({ method: 'POST' })
-  .inputValidator(
-    (input: { isFindable: boolean; locationHint: string | null }) => input,
-  )
+  .inputValidator((input: { isFindable: boolean; locationHint: string | null }) => input)
   .handler(async ({ data }) => {
     return saveFinderProfile(data)
   })
@@ -76,51 +65,31 @@ const pingParticipant = createServerFn({ method: 'POST' })
     return pingFindableUser(data)
   })
 
-const loadScanPreview = createServerFn({ method: 'POST' })
-  .inputValidator((input: { token: string }) => input)
+const submitConnectRequest = createServerFn({ method: 'POST' })
+  .inputValidator((input: { recipientUserId: string; introMessage: string }) => input)
   .handler(async ({ data }) => {
-    return resolveScanToken(data)
+    return sendConnectRequest(data)
   })
 
-const connectScannedQr = createServerFn({ method: 'POST' })
-  .inputValidator((input: { token: string }) => input)
+const replyToConnectRequest = createServerFn({ method: 'POST' })
+  .inputValidator((input: { requestId: string; accept: boolean }) => input)
   .handler(async ({ data }) => {
-    return connectFromScan(data)
+    return respondToConnectRequest(data)
   })
 
 const endConversation = createServerFn({ method: 'POST' }).handler(async () => {
   return endCurrentConnection()
 })
 
-const loadScanJoinPreview = createServerFn({ method: 'POST' })
-  .inputValidator((input: { token: string }) => input)
-  .handler(async ({ data }) => {
-    return previewScanJoin(data)
-  })
-
-const joinScannedPlace = createServerFn({ method: 'POST' })
-  .inputValidator((input: { token: string }) => input)
-  .handler(async ({ data }) => {
-    return joinPlaceAndConnectFromScan(data)
-  })
-
 export const Route = createFileRoute('/')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    scan: typeof search.scan === 'string' ? search.scan : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>) => ({}),
   loader: async () => loadAppState(),
   component: App,
 })
 
 function App() {
-  const {
-    session,
-    profile,
-    currentPlace,
-    qrHandoff,
-    activeConnection,
-  } = Route.useLoaderData()
-  const { scan } = Route.useSearch()
+  const { session, profile, currentPlace, pendingIncomingRequests, activeConnection } =
+    Route.useLoaderData()
   const router = useRouter()
 
   // Identify the user in PostHog once session is available
@@ -137,15 +106,6 @@ function App() {
     await router.invalidate()
   }
 
-  const clearScanToken = async () => {
-    await router.navigate({
-      to: '/',
-      search: {
-        scan: undefined,
-      },
-    })
-  }
-
   // Analytics-wrapped handlers
   const trackedSetReady: typeof updateReadyState = async (opts) => {
     const result = await updateReadyState(opts)
@@ -160,15 +120,17 @@ function App() {
     return clearCurrentPlace(opts)
   }
 
-  const trackedConnectScan: typeof connectScannedQr = async (opts) => {
-    const result = await connectScannedQr(opts)
-    if (result.success) posthog.capture('qr_connection_made', { place_id: profile?.currentPlaceId })
+  const trackedSendRequest: typeof submitConnectRequest = async (opts) => {
+    const result = await submitConnectRequest(opts)
+    posthog.capture('connect_request_sent', { place_id: profile?.currentPlaceId })
     return result
   }
 
-  const trackedJoinScannedPlace: typeof joinScannedPlace = async (opts) => {
-    const result = await joinScannedPlace(opts)
-    posthog.capture('scan_join_place')
+  const trackedRespondToRequest: typeof replyToConnectRequest = async (opts) => {
+    const result = await replyToConnectRequest(opts)
+    posthog.capture(opts.data.accept ? 'connect_request_accepted' : 'connect_request_rejected', {
+      place_id: profile?.currentPlaceId,
+    })
     return result
   }
 
@@ -182,37 +144,21 @@ function App() {
     return <AuthScreen refreshSession={refreshSession} />
   }
 
-  if (scan && !profile?.currentPlaceId) {
-    return (
-      <ScanJoinScreen
-        session={session}
-        scanToken={scan}
-        refreshSession={refreshSession}
-        clearScanToken={clearScanToken}
-        loadPreview={loadScanJoinPreview}
-        joinAndConnect={trackedJoinScannedPlace}
-      />
-    )
-  }
-
-  if (profile && currentPlace && qrHandoff) {
+  if (profile && currentPlace) {
     return (
       <PlaceViewScreen
         session={session}
         profile={profile}
         currentPlace={currentPlace}
-        qrHandoff={qrHandoff}
         activeConnection={activeConnection}
-        initialScanToken={scan ?? null}
+        pendingIncomingRequests={pendingIncomingRequests}
         refreshSession={refreshSession}
-        clearScanToken={clearScanToken}
         setReady={trackedSetReady}
         saveFinderProfile={updateFinderProfile}
         leavePlace={trackedLeavePlace}
         pingParticipant={pingParticipant}
-        loadScanPreview={loadScanPreview}
-        connectScan={trackedConnectScan}
-        endConversation={endConversation}
+        sendConnectRequest={trackedSendRequest}
+        respondToRequest={trackedRespondToRequest}        endConversation={endConversation}
       />
     )
   }
