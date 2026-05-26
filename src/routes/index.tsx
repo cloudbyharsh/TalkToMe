@@ -6,6 +6,7 @@ import { AuthScreen } from '../components/AuthScreen'
 import { OnboardingScreen } from '../components/OnboardingScreen'
 import { PlaceViewScreen } from '../components/PlaceViewScreen'
 import {
+  addMessageToRequest,
   endCurrentConnection,
   getAppState,
   getNearbyPlacePreview,
@@ -71,6 +72,12 @@ const submitConnectRequest = createServerFn({ method: 'POST' })
     return sendConnectRequest(data)
   })
 
+const submitRequestMessage = createServerFn({ method: 'POST' })
+  .inputValidator((input: { requestId: string; body: string }) => input)
+  .handler(async ({ data }) => {
+    return addMessageToRequest(data)
+  })
+
 const replyToConnectRequest = createServerFn({ method: 'POST' })
   .inputValidator((input: { requestId: string; accept: boolean }) => input)
   .handler(async ({ data }) => {
@@ -92,7 +99,6 @@ function App() {
     Route.useLoaderData()
   const router = useRouter()
 
-  // Identify the user in PostHog once session is available
   useEffect(() => {
     if (session?.user?.id) {
       posthog.identify(session.user.id, {
@@ -106,7 +112,6 @@ function App() {
     await router.invalidate()
   }
 
-  // Analytics-wrapped handlers
   const trackedSetReady: typeof updateReadyState = async (opts) => {
     const result = await updateReadyState(opts)
     posthog.capture(opts.data.ready ? 'user_set_ready' : 'user_set_not_ready', {
@@ -158,7 +163,9 @@ function App() {
         leavePlace={trackedLeavePlace}
         pingParticipant={pingParticipant}
         sendConnectRequest={trackedSendRequest}
-        respondToRequest={trackedRespondToRequest}        endConversation={endConversation}
+        addRequestMessage={submitRequestMessage}
+        respondToRequest={trackedRespondToRequest}
+        endConversation={endConversation}
       />
     )
   }

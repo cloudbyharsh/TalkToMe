@@ -171,6 +171,7 @@ export const handoffConnection = sqliteTable(
 // Connect requests replace QR-scan as the primary way to initiate a conversation.
 // User A sends a request with an optional intro message; User B accepts or rejects.
 // On acceptance a handoffConnection is created and both users move to in_conversation.
+// Requests expire after 10 minutes if not acted on.
 export const connectRequest = sqliteTable(
   'connect_request',
   {
@@ -181,11 +182,13 @@ export const connectRequest = sqliteTable(
     recipientUserId: text('recipient_user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    placeId: text('place_id')      .notNull()
+    placeId: text('place_id')
+      .notNull()
       .references(() => place.placeId, { onDelete: 'cascade' }),
     introMessage: text('intro_message'),
-    // pending | accepted | rejected | cancelled
+    // pending | accepted | rejected | cancelled | expired
     status: text('status').notNull().default('pending'),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
@@ -193,6 +196,28 @@ export const connectRequest = sqliteTable(
     index('connect_request_requester_idx').on(table.requesterUserId),
     index('connect_request_recipient_idx').on(table.recipientUserId),
     index('connect_request_place_idx').on(table.placeId),
+  ],
+)
+
+// Pre-conversation messages sent within a pending connect request.
+// Each user may send at most 3 messages per request (body <= 240 chars).
+// Messages are only allowed while the request is still pending.
+export const connectRequestMessage = sqliteTable(
+  'connect_request_message',
+  {
+    id: text('id').primaryKey(),
+    requestId: text('request_id')
+      .notNull()
+      .references(() => connectRequest.id, { onDelete: 'cascade' }),
+    senderUserId: text('sender_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('crm_request_idx').on(table.requestId),
+    index('crm_sender_idx').on(table.senderUserId),
   ],
 )
 

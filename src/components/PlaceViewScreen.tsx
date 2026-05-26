@@ -17,12 +17,15 @@ import { authClient } from '../lib/auth-client'
 import type {
   ActiveConnectionState,
   AppSession,
+  ConnectRequestMessage,
   CurrentPlaceState,
   IncomingConnectRequest,
   PlaceAgentState,
   UserProfileState,
 } from '../lib/app-types'
 import type { PlaceAgent } from '../lib/server/agents/place-agent'
+
+const MAX_MESSAGES_PER_USER = 3
 
 type AuthResult = {
   error?: {
@@ -146,6 +149,7 @@ export function PlaceViewScreen({
   leavePlace,
   pingParticipant,
   sendConnectRequest,
+  addRequestMessage,
   respondToRequest,
   endConversation,
   client = authClient,
@@ -164,6 +168,9 @@ export function PlaceViewScreen({
   pingParticipant: (input: { data: { userId: string } }) => Promise<unknown>
   sendConnectRequest: (input: {
     data: { recipientUserId: string; introMessage: string }
+  }) => Promise<unknown>
+  addRequestMessage: (input: {
+    data: { requestId: string; body: string }
   }) => Promise<unknown>
   respondToRequest: (input: {
     data: { requestId: string; accept: boolean }
@@ -195,7 +202,7 @@ export function PlaceViewScreen({
   )
   const [motionNotice, setMotionNotice] = useState<string | null>(null)
 
-  // Connect request state
+  // Connect request send state
   const [connectModalTarget, setConnectModalTarget] = useState<{
     userId: string
     username: string
@@ -204,7 +211,16 @@ export function PlaceViewScreen({
   } | null>(null)
   const [introMessage, setIntroMessage] = useState('')
   const [connectError, setConnectError] = useState<string | null>(null)
+
+  // Incoming request reply state (keyed by requestId)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [pendingReplyRequestId, setPendingReplyRequestId] = useState<string | null>(null)
+  const [replyError, setReplyError] = useState<string | null>(null)
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
+  const [acceptedRequestThread, setAcceptedRequestThread] = useState<{
+    introMessage: string | null
+    messages: ConnectRequestMessage[]
+  } | null>(null)
 
   const readyRequestInFlightRef = useRef(false)
   const motionArmedRef = useRef(false)
@@ -352,6 +368,17 @@ export function PlaceViewScreen({
   useEffect(() => {
     if (locationHint) setSelectedFinderHint(locationHint)
   }, [locationHint])
+
+  // Auto-poll for incoming requests and message updates while the user is
+  // present/ready (not in a conversation). This keeps the request card and
+  // thread messages live without needing a manual page refresh.
+  useEffect(() => {
+    if (isInConversation) return
+    const id = window.setInterval(() => {
+      void refreshSession()
+    }, 6000)
+    return () => window.clearInterval(id)
+  }, [isInConversation])
 
   useEffect(() => {
     const nextPingValue = activePingRequestedAt?.toString() ?? null
@@ -513,6 +540,7 @@ export function PlaceViewScreen({
     try {
       await endConversation()
       await refreshSession()
+      setAcceptedRequestThread(null)
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -573,7 +601,7 @@ export function PlaceViewScreen({
     }
   }
 
-  // Connect request handlers
+  // Connect request send handlers
   const handleOpenConnectModal = (participant: PlaceAgentState['participants'][number]) => {
     setConnectModalTarget({
       userId: participant.userId,
@@ -615,14 +643,52 @@ export function PlaceViewScreen({
     }
   }
 
+  // Incoming request reply handlers
+  const handleSendReply = async (requestId: string) => {
+    const body = (replyDrafts[requestId] ?? '').trim()
+    if (!body) return
+    setPendingReplyRequestId(requestId)
+    setReplyError(null)
+    try {
+      await addRequestMessage({ data: { requestId, body } })
+      setReplyDrafts((prev) => ({ ...prev, [requestId]: '' }))
+      await refreshSession()
+    } catch (nextError) {
+      setReplyError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Unable to send that message right now.',
+      )
+    } finally {
+      setPendingReplyRequestId(null)
+    }
+  }
+
   const handleRespondToRequest = async (requestId: string, accept: boolean) => {
     setRespondingRequestId(requestId)
     setPendingAction('respond')
     setError(null)
     try {
+      if (accept) {
+        // Capture the thread before the request disappears from the pending list
+        const req = pendingIncomingRequests.find((r) => r.id === requestId)
+        if (req) {
+          setAcceptedRequestThread({
+            introMessage: req.introMessage ?? null,
+            messages: req.messages,
+          })
+        }
+      }
       await respondToRequest({ data: { requestId, accept } })
+      if (accept) {
+        setConversationNotice({
+          title: "You're talking now.",
+          description: 'Meet in person when ready.',
+        })
+      }
       await refreshSession()
     } catch (nextError) {
+      setAcceptedRequestThread(null)
       setError(
         nextError instanceof Error
           ? nextError.message
@@ -648,7 +714,7 @@ export function PlaceViewScreen({
           </h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-[var(--rt-ink-soft)] sm:text-lg">
             You are here as {username}. Go ready when you want to meet someone,
-            then send a connect request to start the conversation.
+            then send a request to talk to start the conversation.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -694,11 +760,11 @@ export function PlaceViewScreen({
                 <div>
                   <p className="text-sm font-semibold text-[var(--rt-ink)]">
                     {pendingIncomingRequests.length === 1
-                      ? '1 connect request'
-                      : `${pendingIncomingRequests.length} connect requests`}
+                      ? '1 request to talk'
+                      : `${pendingIncomingRequests.length} requests to talk`}
                   </p>
                   <p className="text-sm leading-6 text-[var(--rt-ink-soft)]">
-                    Someone wants to meet you. Accept or decline below.
+                    Someone nearby wants to meet you. Accept or decline below.
                   </p>
                 </div>
               </div>
@@ -708,7 +774,15 @@ export function PlaceViewScreen({
                   <IncomingRequestCard
                     key={req.id}
                     request={req}
+                    currentUserId={session.user.id}
                     isResponding={respondingRequestId === req.id}
+                    isSendingReply={pendingReplyRequestId === req.id}
+                    replyDraft={replyDrafts[req.id] ?? ''}
+                    replyError={replyError}
+                    onReplyDraftChange={(val) =>
+                      setReplyDrafts((prev) => ({ ...prev, [req.id]: val }))
+                    }
+                    onSendReply={() => void handleSendReply(req.id)}
                     onAccept={() => void handleRespondToRequest(req.id, true)}
                     onReject={() => void handleRespondToRequest(req.id, false)}
                   />
@@ -725,7 +799,7 @@ export function PlaceViewScreen({
                   Who is ready here
                 </p>
                 <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Tap Connect on someone to send them an intro and start the conversation.
+                  Tap Request to talk on someone to send them an intro and start the conversation.
                 </p>
               </div>
               <div className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-sm font-semibold text-[var(--rt-accent)]">
@@ -808,7 +882,7 @@ export function PlaceViewScreen({
               {isInConversation
                 ? `You are currently talking${resolvedActiveConnection ? ` with ${resolvedActiveConnection.counterpart.username}` : ''}.`
                 : isReady
-                ? 'You are visible in the ready count. Others can send you a connect request.'
+                ? 'You are visible in the ready count. Others can send you a request to talk.'
                 : 'You are present here, but not yet in the ready count.'}
             </p>
 
@@ -829,7 +903,7 @@ export function PlaceViewScreen({
                 className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${
                   isReady
                     ? 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
-                    : 'bg-[#1b8d6d] hover:bg-[#157257]'
+                    : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
                 }`}
               >
                 {pendingAction === 'ready'
@@ -951,7 +1025,7 @@ export function PlaceViewScreen({
               className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${
                 isFindable
                   ? 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
-                  : 'bg-[#1b8d6d] hover:bg-[#157257]'
+                  : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
               }`}
             >
               {pendingAction === 'finder'
@@ -986,6 +1060,39 @@ export function PlaceViewScreen({
                 Take your time. Either person can end the conversation, and you will
                 both return to ready automatically.
               </p>
+
+              {/* Show the pre-conversation thread from the request */}
+              {acceptedRequestThread &&
+              (acceptedRequestThread.introMessage || acceptedRequestThread.messages.length > 0) ? (
+                <div className="mt-4 rounded-2xl border border-[var(--rt-border)] bg-white/70 p-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-soft)]">
+                    Before you met
+                  </p>
+                  {acceptedRequestThread.introMessage ? (
+                    <div className="mb-2 flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm leading-6 text-[var(--rt-ink)]">
+                        {acceptedRequestThread.introMessage}
+                      </div>
+                    </div>
+                  ) : null}
+                  {acceptedRequestThread.messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`mb-2 flex ${msg.senderUserId === session.user.id ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                          msg.senderUserId === session.user.id
+                            ? 'bg-[var(--rt-accent)] text-white'
+                            : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink)]'
+                        }`}
+                      >
+                        {msg.body}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -1009,17 +1116,17 @@ export function PlaceViewScreen({
         </section>
       </div>
 
-      {/* Connect request modal */}
+      {/* Request to talk modal */}
       {connectModalTarget ? (
         <div className="fixed inset-0 z-50 flex items-end bg-[rgba(17,52,44,0.55)] sm:items-center sm:justify-center">
           <div className="w-full max-w-xl rounded-t-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-6 shadow-[0_24px_80px_rgba(17,52,44,0.22)] sm:rounded-[2rem] sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm uppercase tracking-[0.24em] text-[var(--rt-accent)]">
-                  Send a request
+                  Request to talk
                 </p>
                 <h3 className="mt-2 text-2xl font-bold text-[var(--rt-ink)]">
-                  Introduce yourself
+                  Send a short note
                 </h3>
               </div>
               <button
@@ -1044,7 +1151,7 @@ export function PlaceViewScreen({
             <div className="mt-5">
               <label>
                 <span className="mb-2 block text-sm font-semibold text-[var(--rt-ink)]">
-                  Your intro message
+                  Your message <span className="font-normal text-[var(--rt-ink-soft)]">(optional)</span>
                 </span>
                 <p className="mb-3 text-sm leading-6 text-[var(--rt-ink-soft)]">
                   Keep it genuine. {connectModalTarget.username} will use this to decide whether to meet you.
@@ -1053,10 +1160,13 @@ export function PlaceViewScreen({
                   value={introMessage}
                   onChange={(e) => setIntroMessage(e.target.value)}
                   rows={3}
-                  maxLength={280}
+                  maxLength={240}
                   placeholder={`Hi, I noticed you're open to a conversation. I'd love to chat about...`}
                   className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
                 />
+                <p className="mt-1 text-right text-xs text-[var(--rt-ink-soft)]">
+                  {introMessage.length}/240
+                </p>
               </label>
             </div>
 
@@ -1070,11 +1180,11 @@ export function PlaceViewScreen({
               <button
                 type="button"
                 onClick={() => void handleSendConnectRequest()}
-                disabled={pendingAction === 'connect' || !introMessage.trim()}
+                disabled={pendingAction === 'connect'}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <Send className="h-4 w-4" />
-                {pendingAction === 'connect' ? 'Sending...' : 'Send request'}
+                {pendingAction === 'connect' ? 'Sending...' : 'Request to talk'}
               </button>
               <button
                 type="button"
@@ -1104,7 +1214,7 @@ function MetricCard({
 }) {
   const styles = {
     amber: 'border-[var(--rt-border)] bg-[var(--rt-accent-soft)] text-[var(--rt-accent)]',
-    emerald: 'border-[var(--rt-border)] bg-[color:rgba(27,141,109,0.12)] text-[#0b5d49]',
+    emerald: 'border-[var(--rt-border)] bg-[color:rgba(79,70,229,0.10)] text-[var(--rt-accent)]',
     slate: 'border-[var(--rt-border)] bg-white text-[var(--rt-ink)]',
   }[tone]
 
@@ -1119,17 +1229,54 @@ function MetricCard({
   )
 }
 
+function MessageBubble({
+  message,
+  isSelf,
+}: {
+  message: ConnectRequestMessage
+  isSelf: boolean
+}) {
+  return (
+    <div className={`flex ${isSelf ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+          isSelf
+            ? 'bg-[var(--rt-accent)] text-white'
+            : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink)]'
+        }`}
+      >
+        {message.body}
+      </div>
+    </div>
+  )
+}
+
 function IncomingRequestCard({
   request,
+  currentUserId,
   isResponding,
+  isSendingReply,
+  replyDraft,
+  replyError,
+  onReplyDraftChange,
+  onSendReply,
   onAccept,
   onReject,
 }: {
   request: IncomingConnectRequest
+  currentUserId: string
   isResponding: boolean
+  isSendingReply: boolean
+  replyDraft: string
+  replyError: string | null
+  onReplyDraftChange: (val: string) => void
+  onSendReply: () => void
   onAccept: () => void
   onReject: () => void
 }) {
+  const recipientMessageCount = request.recipientMessageCount
+  const canReply = recipientMessageCount < MAX_MESSAGES_PER_USER
+
   return (
     <div className="rounded-3xl border border-[var(--rt-border)] bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -1142,15 +1289,71 @@ function IncomingRequestCard({
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
-          Request
+          Request to talk
         </span>
       </div>
 
+      {/* Intro message */}
       {request.introMessage ? (
         <div className="mt-3 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3">
           <p className="text-sm leading-6 text-[var(--rt-ink)]">
             "{request.introMessage}"
           </p>
+        </div>
+      ) : null}
+
+      {/* Thread messages */}
+      {request.messages.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {request.messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              isSelf={msg.senderUserId === currentUserId}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* Message counter */}
+      <p className="mt-3 text-xs text-[var(--rt-ink-soft)]">
+        {canReply
+          ? `${recipientMessageCount} of ${MAX_MESSAGES_PER_USER} messages used`
+          : `You've reached the ${MAX_MESSAGES_PER_USER}-message limit for this request.`}
+      </p>
+
+      {/* Reply box */}
+      {canReply ? (
+        <div className="mt-3">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={replyDraft}
+              onChange={(e) => onReplyDraftChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && replyDraft.trim()) {
+                  e.preventDefault()
+                  onSendReply()
+                }
+              }}
+              maxLength={240}
+              placeholder="Send a message…"
+              disabled={isSendingReply}
+              className="flex-1 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={onSendReply}
+              disabled={isSendingReply || !replyDraft.trim()}
+              className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-3 py-2 text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Send message"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+          {replyError ? (
+            <p className="mt-2 text-xs text-rose-600">{replyError}</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -1162,7 +1365,7 @@ function IncomingRequestCard({
           className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
         >
           <Check className="h-4 w-4" />
-          {isResponding ? 'Accepting...' : 'Accept'}
+          {isResponding ? 'Accepting...' : 'Accept and start talking'}
         </button>
         <button
           type="button"
@@ -1225,7 +1428,7 @@ function PresencePersonCard({
               className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--rt-accent-strong)]"
             >
               <Send className="h-3 w-3" />
-              Connect
+              Request to talk
             </button>
           ) : null}
           {onPing ? (

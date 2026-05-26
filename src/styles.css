@@ -1,22 +1,23 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,900;1,9..40,400&display=swap");
 
 @theme {
-  --font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  --font-sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
 }
 
 :root {
-  --rt-bg: #eef6f1;
-  --rt-bg-strong: #dcebdc;
-  --rt-surface: rgba(255, 255, 255, 0.84);
-  --rt-surface-strong: #f8fcf8;
-  --rt-border: #bfd5c4;
-  --rt-border-strong: #87a994;
-  --rt-ink: #11342c;
-  --rt-ink-soft: #45685a;
-  --rt-accent: #123f35;
-  --rt-accent-strong: #0b5d49;
-  --rt-accent-soft: #dcefe3;
-  --rt-accent-soft-strong: #c2dfcf;
+  --rt-bg: #eef2ff;
+  --rt-bg-strong: #e0e7ff;
+  --rt-surface: rgba(255, 255, 255, 0.88);
+  --rt-surface-strong: #f5f7ff;
+  --rt-border: #c7d2fe;
+  --rt-border-strong: #818cf8;
+  --rt-ink: #1e1b4b;
+  --rt-ink-soft: #4338ca;
+  --rt-accent: #4f46e5;
+  --rt-accent-strong: #4338ca;
+  --rt-accent-soft: #eef2ff;
+  --rt-accent-soft-strong: #e0e7ff;
 }
 
 html {
@@ -28,9 +29,9 @@ body {
   min-height: 100vh;
   font-family: var(--font-sans);
   background:
-    radial-gradient(circle at top left, rgba(11, 93, 73, 0.14), transparent 24%),
-    radial-gradient(circle at bottom right, rgba(45, 92, 62, 0.12), transparent 28%),
-    linear-gradient(180deg, #f5fbf7 0%, var(--rt-bg) 100%);
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.13), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(30, 27, 75, 0.10), transparent 30%),
+    linear-gradient(180deg, #f5f7ff 0%, var(--rt-bg) 100%);
   color: var(--rt-ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

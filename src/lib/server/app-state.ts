@@ -1,10 +1,11 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { getAgentByName } from 'agents'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import type {
   ActiveConnectionState,
   AppSession,
   AppState,
+  ConnectRequestMessage,
   CurrentPlaceState,
   IncomingConnectRequest,
   NearbyPlace,
@@ -18,14 +19,22 @@ import { db } from './db'
 import type { UserAgent } from './agents/user-agent'
 import {
   connectRequest,
+  connectRequestMessage,
   handoffConnection,
   place,
   user,
   userProfile,
 } from './db/schema'
-import {
-  getUserAgentBinding,
-} from './env'
+import { getUserAgentBinding } from './env'
+
+/** Requests expire after this many milliseconds (10 minutes). */
+const REQUEST_TTL_MS = 10 * 60 * 1000
+
+/** Maximum messages each participant may send per request. */
+const MAX_MESSAGES_PER_USER = 3
+
+/** Maximum character length for a single message body. */
+const MAX_MESSAGE_BODY_LENGTH = 240
 
 type SessionResult = Awaited<ReturnType<typeof auth.api.getSession>>
 
@@ -94,11 +103,25 @@ async function getPendingIncomingRequests(
   recipientUserId: string,
   placeId: string,
 ): Promise<IncomingConnectRequest[]> {
+  const now = new Date()
+
+  // Expire any overdue pending requests before fetching.
+  await db
+    .update(connectRequest)
+    .set({ status: 'expired', updatedAt: now })
+    .where(
+      and(
+        eq(connectRequest.status, 'pending'),
+        sql`${connectRequest.expiresAt} < ${now.getTime()}`,
+      ),
+    )
+
   const rows = await db
     .select({
       id: connectRequest.id,
       placeId: connectRequest.placeId,
       introMessage: connectRequest.introMessage,
+      expiresAt: connectRequest.expiresAt,
       createdAt: connectRequest.createdAt,
       requesterUserId: connectRequest.requesterUserId,
       requesterDisplayUsername: user.displayUsername,
@@ -120,21 +143,54 @@ async function getPendingIncomingRequests(
     .orderBy(desc(connectRequest.createdAt))
     .limit(10)
 
-  return rows.map((row) => ({
-    id: row.id,
-    placeId: row.placeId,
-    introMessage: row.introMessage,
-    createdAt: row.createdAt,
-    requester: {
-      userId: row.requesterUserId,
-      username:
-        row.requesterDisplayUsername ||
-        row.requesterUsername ||
-        row.requesterName,
-      moodEmoji: row.requesterMoodEmoji ?? null,
-      intentSummary: row.requesterIntentSummary ?? null,
-    },
-  }))
+  if (rows.length === 0) return []
+
+  const requestIds = rows.map((r) => r.id)
+
+  const messageRows = await db
+    .select()
+    .from(connectRequestMessage)
+    .where(inArray(connectRequestMessage.requestId, requestIds))
+    .orderBy(asc(connectRequestMessage.createdAt))
+
+  return rows.map((row) => {
+    const threadMessages = messageRows.filter((m) => m.requestId === row.id)
+
+    const requesterMessageCount =
+      (row.introMessage ? 1 : 0) +
+      threadMessages.filter((m) => m.senderUserId === row.requesterUserId).length
+
+    const recipientMessageCount = threadMessages.filter(
+      (m) => m.senderUserId === recipientUserId,
+    ).length
+
+    const messages: ConnectRequestMessage[] = threadMessages.map((m) => ({
+      id: m.id,
+      senderUserId: m.senderUserId,
+      body: m.body,
+      createdAt: m.createdAt,
+    }))
+
+    return {
+      id: row.id,
+      placeId: row.placeId,
+      introMessage: row.introMessage,
+      expiresAt: row.expiresAt,
+      createdAt: row.createdAt,
+      messages,
+      requesterMessageCount,
+      recipientMessageCount,
+      requester: {
+        userId: row.requesterUserId,
+        username:
+          row.requesterDisplayUsername ||
+          row.requesterUsername ||
+          row.requesterName,
+        moodEmoji: row.requesterMoodEmoji ?? null,
+        intentSummary: row.requesterIntentSummary ?? null,
+      },
+    }
+  })
 }
 
 async function getActiveConnectionForUser(
@@ -381,6 +437,10 @@ export async function sendConnectRequest(input: {
     throw new Error('You cannot send a request to yourself.')
   }
 
+  if (introMessage && introMessage.length > MAX_MESSAGE_BODY_LENGTH) {
+    throw new Error(`Keep your message under ${MAX_MESSAGE_BODY_LENGTH} characters.`)
+  }
+
   const [viewerProfile] = await db
     .select()
     .from(userProfile)
@@ -427,6 +487,8 @@ export async function sendConnectRequest(input: {
     )
 
   const requestId = crypto.randomUUID()
+  const expiresAt = new Date(now.getTime() + REQUEST_TTL_MS)
+
   await db.insert(connectRequest).values({
     id: requestId,
     requesterUserId: session.user.id,
@@ -434,11 +496,100 @@ export async function sendConnectRequest(input: {
     placeId: viewerProfile.currentPlaceId,
     introMessage,
     status: 'pending',
+    expiresAt,
     createdAt: now,
     updatedAt: now,
   })
 
   return { success: true, requestId }
+}
+
+export async function addMessageToRequest(input: {
+  requestId: string
+  body: string
+}) {
+  const session = await requireCurrentSession()
+  const requestId = input.requestId.trim()
+  const body = input.body.replace(/\s+/g, ' ').trim()
+
+  if (!requestId) {
+    throw new Error('No request specified.')
+  }
+
+  if (!body) {
+    throw new Error('Message cannot be empty.')
+  }
+
+  if (body.length > MAX_MESSAGE_BODY_LENGTH) {
+    throw new Error(`Keep your message under ${MAX_MESSAGE_BODY_LENGTH} characters.`)
+  }
+
+  const [requestRecord] = await db
+    .select()
+    .from(connectRequest)
+    .where(eq(connectRequest.id, requestId))
+    .limit(1)
+
+  if (!requestRecord) {
+    throw new Error('That request no longer exists.')
+  }
+
+  // Only the requester and recipient may send messages on this request.
+  const isParticipant =
+    requestRecord.requesterUserId === session.user.id ||
+    requestRecord.recipientUserId === session.user.id
+
+  if (!isParticipant) {
+    throw new Error('You cannot message on this request.')
+  }
+
+  if (requestRecord.status !== 'pending') {
+    throw new Error('That request is no longer pending.')
+  }
+
+  // Check expiry.
+  if (requestRecord.expiresAt.getTime() < Date.now()) {
+    await db
+      .update(connectRequest)
+      .set({ status: 'expired', updatedAt: new Date() })
+      .where(eq(connectRequest.id, requestId))
+    throw new Error('That request has expired.')
+  }
+
+  // Count existing messages from this sender. The requester's introMessage counts as 1.
+  const isRequester = requestRecord.requesterUserId === session.user.id
+  const introMessageCount = isRequester && requestRecord.introMessage ? 1 : 0
+
+  const [{ threadCount }] = await db
+    .select({ threadCount: count() })
+    .from(connectRequestMessage)
+    .where(
+      and(
+        eq(connectRequestMessage.requestId, requestId),
+        eq(connectRequestMessage.senderUserId, session.user.id),
+      ),
+    )
+
+  const totalSent = introMessageCount + (threadCount ?? 0)
+
+  if (totalSent >= MAX_MESSAGES_PER_USER) {
+    throw new Error(
+      `You've reached the ${MAX_MESSAGES_PER_USER}-message limit for this request.`,
+    )
+  }
+
+  const now = new Date()
+  const messageId = crypto.randomUUID()
+
+  await db.insert(connectRequestMessage).values({
+    id: messageId,
+    requestId,
+    senderUserId: session.user.id,
+    body,
+    createdAt: now,
+  })
+
+  return { success: true, messageId }
 }
 
 export async function respondToConnectRequest(input: {
@@ -470,7 +621,15 @@ export async function respondToConnectRequest(input: {
     throw new Error('That request is no longer pending.')
   }
 
+  // Check expiry.
   const now = new Date()
+  if (requestRecord.expiresAt.getTime() < now.getTime()) {
+    await db
+      .update(connectRequest)
+      .set({ status: 'expired', updatedAt: now })
+      .where(eq(connectRequest.id, requestId))
+    throw new Error('That request has expired.')
+  }
 
   if (!input.accept) {
     await db
@@ -544,7 +703,6 @@ export async function respondToConnectRequest(input: {
     .set({ status: 'accepted', updatedAt: now })
     .where(eq(connectRequest.id, requestId))
 
-  // The recipient is the "agent" here — they trigger the connection creation.
   const agent = await getUserAgent(session.user.id)
   const result = await agent.connectWithUser({
     counterpartUserId: requestRecord.requesterUserId,
@@ -754,18 +912,18 @@ export async function getNearbyPlacePreview(input: { placeId: string }) {
     readyCount,
     checkedInCount,
     activeConversationCount,
-      readyParticipants: readyParticipantRecords.map((record) => ({
-        userId: record.userId,
-        username:
-          record.username || record.fallbackUsername || record.fallbackName,
-        moodEmoji: record.moodEmoji,
-        intentSummary: record.intentSummary,
-        status: record.status as NearbyPlacePreviewState['readyParticipants'][number]['status'],
-        isFindable: record.isFindable ?? false,
-        locationHint: record.locationHint ?? null,
-        pingRequestedAt: record.pingRequestedAt,
-        pingRequestedByUserId: record.pingRequestedByUserId ?? null,
-        pingRequestedByUsername: record.pingRequestedByUsername ?? null,
-      })),  } satisfies NearbyPlacePreviewState
+    readyParticipants: readyParticipantRecords.map((record) => ({
+      userId: record.userId,
+      username:
+        record.username || record.fallbackUsername || record.fallbackName,
+      moodEmoji: record.moodEmoji,
+      intentSummary: record.intentSummary,
+      status: record.status as NearbyPlacePreviewState['readyParticipants'][number]['status'],
+      isFindable: record.isFindable ?? false,
+      locationHint: record.locationHint ?? null,
+      pingRequestedAt: record.pingRequestedAt,
+      pingRequestedByUserId: record.pingRequestedByUserId ?? null,
+      pingRequestedByUsername: record.pingRequestedByUsername ?? null,
+    })),
+  } satisfies NearbyPlacePreviewState
 }
-

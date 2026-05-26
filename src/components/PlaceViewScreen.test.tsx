@@ -120,6 +120,7 @@ function renderPlaceViewScreen(
     leavePlace: vi.fn(async () => undefined),
     pingParticipant: vi.fn(async () => ({ success: true })),
     sendConnectRequest: vi.fn(async () => ({ success: true, requestId: 'req-1' })),
+    addRequestMessage: vi.fn(async () => ({ success: true, messageId: 'msg-1' })),
     respondToRequest: vi.fn(async () => ({ success: true, accepted: true })),
     endConversation: vi.fn(async () => ({ success: true })),
     client: {
@@ -292,7 +293,11 @@ describe('PlaceViewScreen', () => {
           id: 'req-1',
           placeId: 'place-1',
           introMessage: 'Hey, would love to chat about startups!',
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
           createdAt: '2026-03-04T19:20:00.000Z',
+          messages: [],
+          requesterMessageCount: 1,
+          recipientMessageCount: 0,
           requester: {
             userId: 'user-2',
             username: 'neighbour',
@@ -305,7 +310,68 @@ describe('PlaceViewScreen', () => {
 
     expect(await screen.findByText('neighbour')).toBeTruthy()
     expect(screen.getByText('"Hey, would love to chat about startups!"')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /accept/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /accept and start talking/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /decline/i })).toBeTruthy()
+  })
+
+  it('renders thread messages in the request card', async () => {
+    renderPlaceViewScreen({
+      pendingIncomingRequests: [
+        {
+          id: 'req-1',
+          placeId: 'place-1',
+          introMessage: 'Hey!',
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
+          createdAt: '2026-03-04T19:20:00.000Z',
+          messages: [
+            {
+              id: 'msg-1',
+              senderUserId: 'user-2',
+              body: 'I am near the window.',
+              createdAt: '2026-03-04T19:21:00.000Z',
+            },
+          ],
+          requesterMessageCount: 2,
+          recipientMessageCount: 0,
+          requester: {
+            userId: 'user-2',
+            username: 'neighbour',
+            moodEmoji: '☕',
+            intentSummary: 'Coffee chat',
+          },
+        },
+      ],
+    })
+
+    expect(await screen.findByText('I am near the window.')).toBeTruthy()
+    // Counter shows 0 of 3 used for recipient
+    expect(screen.getByText('0 of 3 messages used')).toBeTruthy()
+  })
+
+  it('hides the reply box and shows limit notice when recipient has used all 3 messages', async () => {
+    renderPlaceViewScreen({
+      pendingIncomingRequests: [
+        {
+          id: 'req-1',
+          placeId: 'place-1',
+          introMessage: 'Hey!',
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
+          createdAt: '2026-03-04T19:20:00.000Z',
+          messages: [],
+          requesterMessageCount: 1,
+          recipientMessageCount: 3,
+          requester: {
+            userId: 'user-2',
+            username: 'neighbour',
+            moodEmoji: '☕',
+            intentSummary: 'Coffee chat',
+          },
+        },
+      ],
+    })
+
+    await screen.findByText("You've reached the 3-message limit for this request.")
+    // Reply input should not be present
+    expect(screen.queryByPlaceholderText('Send a message…')).toBeNull()
   })
 })

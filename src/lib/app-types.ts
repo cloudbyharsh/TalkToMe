@@ -119,17 +119,31 @@ export type ActiveConnectionState = {
   }
 }
 
+// A single message within a pending connect request.
+export type ConnectRequestMessage = {
+  id: string
+  senderUserId: string
+  body: string
+  createdAt: string | Date
+}
+
 // Connect request types (replace QR scan as the primary connection mechanism)
-export type ConnectRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
+export type ConnectRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired'
 
 export type IncomingConnectRequest = {
   id: string
   placeId: string
   introMessage: string | null
+  expiresAt: string | Date
   createdAt: string | Date
+  messages: ConnectRequestMessage[]
+  /** Total messages sent by the requester (introMessage + thread messages). */
+  requesterMessageCount: number
+  /** Total messages sent by the recipient in the thread. */
+  recipientMessageCount: number
   requester: {
     userId: string
-    username: string
+    username: string
     moodEmoji: string | null
     intentSummary: string | null
   }
