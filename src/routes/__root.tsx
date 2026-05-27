@@ -31,6 +31,15 @@ export const Route = createRootRoute({
         href: appCss,
       },
     ],
+    scripts: [
+      {
+        src: 'https://plausible.io/js/pa-nIBEMbe1-pmDOzS-toflg.js',
+        async: true,
+      },
+      {
+        children: `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()`,
+      },
+    ],
   }),
   shellComponent: RootDocument,
 })
@@ -48,7 +57,7 @@ function PostHogInit() {
   }, [])
   return null
 }
-
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
