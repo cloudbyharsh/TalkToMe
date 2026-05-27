@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { LogIn, MapPin, UserRoundPlus } from 'lucide-react'
+import { AlertCircle, LogIn, MapPin, UserRoundPlus } from 'lucide-react'
 import { authClient } from '../lib/auth-client'
 
 type AuthResult = {
@@ -132,7 +132,7 @@ export function AuthScreen({
                     setMode('sign-in')
                     setError(null)
                   }}
-                  className={`rounded-full px-4 py-2 transition ${
+                  className={`rounded-full px-4 py-2 transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] ${
                     mode === 'sign-in'
                       ? 'bg-[var(--rt-accent)] text-white shadow-sm'
                       : 'text-[var(--rt-ink-soft)] hover:text-[var(--rt-ink)]'
@@ -146,7 +146,7 @@ export function AuthScreen({
                     setMode('sign-up')
                     setError(null)
                   }}
-                  className={`rounded-full px-4 py-2 transition ${
+                  className={`rounded-full px-4 py-2 transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] ${
                     mode === 'sign-up'
                       ? 'bg-[var(--rt-accent)] text-white shadow-sm'
                       : 'text-[var(--rt-ink-soft)] hover:text-[var(--rt-ink)]'
@@ -164,7 +164,8 @@ export function AuthScreen({
             </p>
 
             {error ? (
-              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="rt-notice mt-4 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 {error}
               </div>
             ) : null}
@@ -188,7 +189,7 @@ export function AuthScreen({
                 <button
                   type="submit"
                   disabled={pendingAction === 'sign-in'}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <LogIn className="h-4 w-4" />
                   {pendingAction === 'sign-in' ? 'Logging in...' : 'Log in'}
@@ -221,7 +222,7 @@ export function AuthScreen({
                 <button
                   type="submit"
                   disabled={pendingAction === 'sign-up'}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <UserRoundPlus className="h-4 w-4" />
                   {pendingAction === 'sign-up'
@@ -263,7 +264,7 @@ function FormField({
         type={type}
         autoComplete={autoComplete}
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
+        className="w-full rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
       />
       {hint ? (
         <span className="mt-2 block text-xs text-[var(--rt-ink-soft)]">

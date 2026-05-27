@@ -40,3 +40,91 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* ── Animation keyframes ── */
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes numberPop {
+  from { opacity: 0.3; transform: scale(0.85); }
+  to   { opacity: 1;   transform: scale(1);    }
+}
+
+@keyframes bellRing {
+  0%, 100% { transform: rotate(0deg);   }
+  15%      { transform: rotate(-15deg); }
+  30%      { transform: rotate(15deg);  }
+  45%      { transform: rotate(-10deg); }
+  60%      { transform: rotate(10deg);  }
+  75%      { transform: rotate(-5deg);  }
+}
+
+/* ── Animation utility classes ── */
+
+.rt-modal-backdrop {
+  animation: none; /* opacity handled by starting-style below */
+  background: rgba(17, 52, 44, 0.55);
+  transition: opacity 200ms ease-out;
+  @starting-style { opacity: 0; }
+}
+
+.rt-modal-sheet {
+  animation: slideUp 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rt-notice {
+  animation: slideDown 300ms ease-out both;
+}
+
+.rt-card-stagger {
+  animation: fadeSlideIn 300ms ease-out both;
+}
+
+.rt-number-pop {
+  animation: numberPop 220ms ease-out both;
+}
+
+.rt-bell-ring {
+  display: inline-block;
+  animation: bellRing 0.5s ease-in-out;
+}
+
+@keyframes connectionAccepted {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.rt-connection-accepted {
+  animation: connectionAccepted 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Distinct high-weight notice for "You're talking now" */
+.rt-conversation-notice {
+  animation: slideDown 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: var(--rt-accent);
+  color: white;
+  border-color: var(--rt-accent-strong);
+}
+
+.rt-conversation-notice p {
+  color: white;
+}

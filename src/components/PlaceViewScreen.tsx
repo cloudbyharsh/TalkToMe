@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useAgent } from 'agents/react'
 import {
+  AlertCircle,
   ArrowLeft,
   BellRing,
   Check,
@@ -752,7 +753,7 @@ export function PlaceViewScreen({
 
           {/* Incoming connect requests */}
           {pendingIncomingRequests.length > 0 ? (
-            <div className="mt-6 rounded-[2rem] border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] p-5 shadow-sm">
+            <div className="rt-notice mt-6 rounded-[2rem] border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] p-5 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl border border-[var(--rt-accent)] bg-white p-3 text-[var(--rt-accent)]">
                   <MessageCircle className="h-5 w-5" />
@@ -809,12 +810,13 @@ export function PlaceViewScreen({
 
             {readyParticipants.length > 0 ? (
               <div className="mt-5 space-y-3">
-                {readyParticipants.map((participant) => (
+                {readyParticipants.map((participant, index) => (
                   <PresencePersonCard
                     key={participant.userId}
                     participant={participant}
                     isCurrentUser={participant.userId === session.user.id}
                     isInConversation={isInConversation}
+                    staggerIndex={index}
                     onConnect={
                       participant.userId === session.user.id || isInConversation
                         ? null
@@ -830,8 +832,10 @@ export function PlaceViewScreen({
                 ))}
               </div>
             ) : (
-              <div className="mt-5 rounded-3xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-5 text-sm text-[var(--rt-ink-soft)]">
-                No one is marked ready here yet.
+              <div className="rt-card-stagger mt-5 flex flex-col items-center gap-2 rounded-3xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-8 text-center">
+                <Users className="h-5 w-5 text-[var(--rt-border-strong)]" />
+                <p className="text-sm text-[var(--rt-ink-soft)]">No one is ready here yet.</p>
+                <p className="text-xs text-[var(--rt-ink-soft)]/70">Set yourself ready above to be the first.</p>
               </div>
             )}
 
@@ -870,7 +874,7 @@ export function PlaceViewScreen({
               type="button"
               onClick={handleSignOut}
               disabled={pendingAction === 'sign-out'}
-              className="rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pendingAction === 'sign-out' ? 'Signing out...' : 'Sign out'}
             </button>
@@ -891,7 +895,7 @@ export function PlaceViewScreen({
                 type="button"
                 onClick={handleEndConnection}
                 disabled={pendingAction === 'end-connection'}
-                className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {pendingAction === 'end-connection' ? 'Ending conversation...' : 'I am free again'}
               </button>
@@ -900,9 +904,9 @@ export function PlaceViewScreen({
                 type="button"
                 onClick={handleReadyToggle}
                 disabled={pendingAction === 'ready'}
-                className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${
+                className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 ${
                   isReady
-                    ? 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
+                    ? 'bg-rose-500 hover:bg-rose-600'
                     : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
                 }`}
               >
@@ -936,7 +940,7 @@ export function PlaceViewScreen({
                     type="button"
                     onClick={() => void handleEnableMotionAccess()}
                     disabled={motionAccessState === 'requesting'}
-                    className="mt-4 inline-flex items-center justify-center rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mt-4 inline-flex items-center justify-center rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {motionAccessState === 'requesting'
                       ? 'Enabling motion access...'
@@ -954,14 +958,17 @@ export function PlaceViewScreen({
           </div>
 
           {conversationNotice ? (
-            <div className="mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5 text-[var(--rt-ink)]">
-              <p className="text-sm font-semibold">{conversationNotice.title}</p>
-              <p className="mt-2 text-sm leading-6">{conversationNotice.description}</p>
+            <div className="rt-conversation-notice mt-6 flex items-start gap-3 rounded-3xl border p-5">
+              <Check className="mt-0.5 h-4 w-4 shrink-0 opacity-90" />
+              <div>
+                <p className="text-sm font-semibold">{conversationNotice.title}</p>
+                <p className="mt-1 text-sm leading-6 opacity-90">{conversationNotice.description}</p>
+              </div>
             </div>
           ) : null}
 
           {finderNotice ? (
-            <div className="mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5 text-[var(--rt-ink)]">
+            <div className="rt-notice mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5 text-[var(--rt-ink)]">
               <p className="text-sm font-semibold">{finderNotice.title}</p>
               <p className="mt-2 text-sm leading-6">{finderNotice.description}</p>
             </div>
@@ -989,10 +996,10 @@ export function PlaceViewScreen({
                     type="button"
                     onClick={() => void handleSelectFinderHint(hint)}
                     disabled={!isReady || isInConversation || pendingAction === 'finder'}
-                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    className={`rounded-full px-4 py-2 text-sm font-medium transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96] ${
                       isSelected
                         ? 'bg-[var(--rt-accent)] text-white'
-                        : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)]'
+                        : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]'
                     } disabled:cursor-not-allowed disabled:opacity-60`}
                   >
                     {hint}
@@ -1022,9 +1029,9 @@ export function PlaceViewScreen({
               type="button"
               onClick={() => void handleFinderToggle()}
               disabled={!isReady || isInConversation || pendingAction === 'finder'}
-              className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${
+              className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 ${
                 isFindable
-                  ? 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
+                  ? 'bg-rose-500 hover:bg-rose-600'
                   : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
               }`}
             >
@@ -1037,7 +1044,7 @@ export function PlaceViewScreen({
           </div>
 
           {resolvedActiveConnection ? (
-            <div className="mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5">
+            <div className="rt-connection-accepted mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5">
               <div className="flex items-center justify-between gap-3 text-[var(--rt-accent)]">
                 <div className="flex items-center gap-3">
                   <MessageCircle className="h-5 w-5" />
@@ -1101,7 +1108,7 @@ export function PlaceViewScreen({
               type="button"
               onClick={handleLeavePlace}
               disabled={pendingAction === 'leave'}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               <ArrowLeft className="h-4 w-4" />
               {pendingAction === 'leave' ? 'Leaving place...' : 'Switch place'}
@@ -1109,7 +1116,8 @@ export function PlaceViewScreen({
           </div>
 
           {error ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="rt-notice mt-4 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               {error}
             </div>
           ) : null}
@@ -1118,8 +1126,8 @@ export function PlaceViewScreen({
 
       {/* Request to talk modal */}
       {connectModalTarget ? (
-        <div className="fixed inset-0 z-50 flex items-end bg-[rgba(17,52,44,0.55)] sm:items-center sm:justify-center">
-          <div className="w-full max-w-xl rounded-t-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-6 shadow-[0_24px_80px_rgba(17,52,44,0.22)] sm:rounded-[2rem] sm:p-8">
+        <div className="rt-modal-backdrop fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center">
+          <div className="rt-modal-sheet w-full max-w-xl rounded-t-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-6 shadow-[0_24px_80px_rgba(17,52,44,0.22)] sm:rounded-[2rem] sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm uppercase tracking-[0.24em] text-[var(--rt-accent)]">
@@ -1132,7 +1140,7 @@ export function PlaceViewScreen({
               <button
                 type="button"
                 onClick={handleCloseConnectModal}
-                className="rounded-full border border-[var(--rt-border)] p-2 text-[var(--rt-ink-soft)] transition hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)]"
+                className="rounded-full border border-[var(--rt-border)] p-2 text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.9] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]"
                 aria-label="Close"
               >
                 <X className="h-4 w-4" />
@@ -1162,7 +1170,7 @@ export function PlaceViewScreen({
                   rows={3}
                   maxLength={240}
                   placeholder={`Hi, I noticed you're open to a conversation. I'd love to chat about...`}
-                  className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
+                  className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
                 />
                 <p className="mt-1 text-right text-xs text-[var(--rt-ink-soft)]">
                   {introMessage.length}/240
@@ -1171,7 +1179,8 @@ export function PlaceViewScreen({
             </div>
 
             {connectError ? (
-              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="rt-notice mt-4 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 {connectError}
               </div>
             ) : null}
@@ -1181,7 +1190,7 @@ export function PlaceViewScreen({
                 type="button"
                 onClick={() => void handleSendConnectRequest()}
                 disabled={pendingAction === 'connect'}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <Send className="h-4 w-4" />
                 {pendingAction === 'connect' ? 'Sending...' : 'Request to talk'}
@@ -1189,7 +1198,7 @@ export function PlaceViewScreen({
               <button
                 type="button"
                 onClick={handleCloseConnectModal}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)]"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]"
               >
                 Cancel
               </button>
@@ -1224,7 +1233,7 @@ function MetricCard({
         {icon}
       </div>
       <p className="mt-4 text-sm font-medium">{label}</p>
-      <p className="mt-2 text-4xl font-black tracking-[-0.04em]">{value}</p>
+      <p key={value} className="rt-number-pop mt-2 text-4xl font-black tracking-[-0.04em]">{value}</p>
     </div>
   )
 }
@@ -1339,13 +1348,13 @@ function IncomingRequestCard({
               maxLength={240}
               placeholder="Send a message…"
               disabled={isSendingReply}
-              className="flex-1 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex-1 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)] disabled:cursor-not-allowed disabled:opacity-60"
             />
             <button
               type="button"
               onClick={onSendReply}
               disabled={isSendingReply || !replyDraft.trim()}
-              className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-3 py-2 text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-3 py-2 text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
               aria-label="Send message"
             >
               <Send className="h-4 w-4" />
@@ -1362,7 +1371,7 @@ function IncomingRequestCard({
           type="button"
           onClick={onAccept}
           disabled={isResponding}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--rt-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
         >
           <Check className="h-4 w-4" />
           {isResponding ? 'Accepting...' : 'Accept and start talking'}
@@ -1371,7 +1380,7 @@ function IncomingRequestCard({
           type="button"
           onClick={onReject}
           disabled={isResponding}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
         >
           <X className="h-4 w-4" />
           Decline
@@ -1385,6 +1394,7 @@ function PresencePersonCard({
   participant,
   isCurrentUser,
   isInConversation,
+  staggerIndex = 0,
   onConnect,
   onPing,
   isPinging,
@@ -1392,12 +1402,16 @@ function PresencePersonCard({
   participant: PlaceAgentState['participants'][number]
   isCurrentUser: boolean
   isInConversation: boolean
+  staggerIndex?: number
   onConnect: (() => void) | null
   onPing: (() => void) | null
   isPinging: boolean
 }) {
   return (
-    <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4">
+    <div
+      className="rt-card-stagger rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4"
+      style={{ animationDelay: `${staggerIndex * 50}ms` }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-[var(--rt-ink)]">
@@ -1425,7 +1439,7 @@ function PresencePersonCard({
             <button
               type="button"
               onClick={onConnect}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--rt-accent-strong)]"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)]"
             >
               <Send className="h-3 w-3" />
               Request to talk
@@ -1436,9 +1450,9 @@ function PresencePersonCard({
               type="button"
               onClick={onPing}
               disabled={isPinging}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--rt-ink)] transition hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <BellRing className="h-3.5 w-3.5" />
+              <BellRing className={`h-3.5 w-3.5${isPinging ? ' rt-bell-ring' : ''}`} />
               {isPinging ? 'Pinging...' : 'Ping me'}
             </button>
           ) : null}

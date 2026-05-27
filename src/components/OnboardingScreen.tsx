@@ -344,7 +344,7 @@ export function OnboardingScreen({
               type="button"
               onClick={handleSignOut}
               disabled={pendingAction === 'sign-out'}
-              className="shrink-0 rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="shrink-0 rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pendingAction === 'sign-out' ? 'Signing out...' : 'Sign out'}
             </button>
@@ -371,7 +371,7 @@ export function OnboardingScreen({
               type="button"
               onClick={handleEnableLocation}
               disabled={locationStatus === 'requesting'}
-              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {locationStatus === 'requesting'
                 ? 'Checking location...'
@@ -450,7 +450,7 @@ export function OnboardingScreen({
               <button
                 type="button"
                 onClick={() => setSelectedPlaceId(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition hover:border-[var(--rt-border-strong)] hover:text-[var(--rt-ink)]"
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back to places
@@ -576,10 +576,10 @@ export function OnboardingScreen({
                         key={option}
                         type="button"
                         onClick={() => setMoodEmoji(option)}
-                        className={`rounded-2xl border px-4 py-3 text-2xl transition ${
+                        className={`rounded-2xl border px-4 py-3 text-2xl transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.95] ${
                           isSelected
                             ? 'border-[var(--rt-accent)] bg-[var(--rt-accent)] text-white'
-                            : 'border-[var(--rt-border)] bg-white hover:border-[var(--rt-border-strong)]'
+                            : 'border-[var(--rt-border)] bg-white [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
                         }`}
                         aria-pressed={isSelected}
                       >
@@ -598,7 +598,7 @@ export function OnboardingScreen({
                     onChange={(event) => setIntentText(event.target.value)}
                     rows={4}
                     placeholder="Coffee break, startup ideas, a quiet walk, meeting someone new..."
-                    className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
+                    className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
                   />
                 </label>
 
@@ -614,7 +614,7 @@ export function OnboardingScreen({
                   type="button"
                   onClick={handleSaveProfile}
                   disabled={pendingAction === 'save' || placePreviewLoading}
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {pendingAction === 'save'
                     ? 'Saving intro...'
@@ -660,7 +660,7 @@ function PreviewMetricCard({
   label: string
   value: string
 }) {
-  return (
+  return (
     <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] px-4 py-4">
       <div className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-ink-soft)]">
         {icon}
@@ -684,10 +684,10 @@ function PlaceChoiceCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`w-full rounded-3xl border px-4 py-4 text-left transition ${
+      className={`rt-card-stagger w-full rounded-3xl border px-4 py-4 text-left transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.98] ${
         isSelected
           ? 'border-[var(--rt-accent)] bg-[var(--rt-accent)] text-white shadow-lg'
-          : 'border-[var(--rt-border)] bg-white/86 text-[var(--rt-ink)] hover:border-[var(--rt-border-strong)]'
+          : 'border-[var(--rt-border)] bg-white/86 text-[var(--rt-ink)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
