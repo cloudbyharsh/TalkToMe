@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   ArrowLeft,
-  MessageCircle,
   MapPin,
   Users,
 } from 'lucide-react'
 import { authClient } from '../lib/auth-client'
-import { NearbyPlacesMap } from './NearbyPlacesMap'
 import type {
   AppSession,
   NearbyPlace,
   NearbyPlacePreviewState,
   UserProfileState,
 } from '../lib/app-types'
+
+// Lazy-loaded so Leaflet (browser-only) never enters the SSR/Workers bundle
+const NearbyPlacesMap = lazy(() =>
+  import('./NearbyPlacesMap').then((m) => ({ default: m.NearbyPlacesMap })),
+)
 
 type AuthResult = {
   error?: {
@@ -32,7 +34,20 @@ type LocationStatus =
   | 'denied'
   | 'unsupported'
 
-const MOOD_OPTIONS = ['🙂', '😌', '☕', '🤝', '💬', '🌿']
+const MOOD_OPTIONS = [
+  { emoji: '👋', label: 'Friendly' },
+  { emoji: '☕', label: 'Chill' },
+  { emoji: '💡', label: 'Curious' },
+  { emoji: '🧘', label: 'Calm' },
+  { emoji: '🚀', label: 'Energised' },
+  { emoji: '❤️', label: 'Warm' },
+]
+
+const TAG_OPTIONS = [
+  'Tech', 'Design', 'Coffee', 'Startups', 'Books',
+  'Music', 'Travel', 'Fitness', 'Art', 'Food',
+  'Photography', 'Gaming', 'Science', 'Film',
+]
 
 export function OnboardingScreen({
   session,
@@ -84,8 +99,9 @@ export function OnboardingScreen({
   )
   const [placePreviewLoading, setPlacePreviewLoading] = useState(false)
   const [placePreviewError, setPlacePreviewError] = useState<string | null>(null)
-  const [moodEmoji, setMoodEmoji] = useState(profile?.moodEmoji ?? '🙂')
+  const [moodEmoji, setMoodEmoji] = useState(profile?.moodEmoji ?? '👋')
   const [intentText, setIntentText] = useState(profile?.intentText ?? '')
+  const [selectedTags, setSelectedTags] = useState<string[]>(profile?.tags ?? [])
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const username =
@@ -305,6 +321,7 @@ export function OnboardingScreen({
           moodEmoji,
           intentText,
           currentPlaceId: selectedPlace.placeId,
+          tags: selectedTags,
         },
       })
       if (nextProfile.userId) {
@@ -322,102 +339,92 @@ export function OnboardingScreen({
   }
 
   return (
-    <main className="min-h-screen px-4 py-5 sm:px-6">
-      <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] w-full max-w-xl flex-col gap-4">
-        <section className="rounded-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface)] p-5 shadow-[0_28px_80px_rgba(17,52,44,0.12)] backdrop-blur-xl sm:p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--rt-accent)]">
-                <MapPin className="h-3.5 w-3.5" />
-                Nearby now
-              </div>
-              <h1 className="mt-4 text-3xl font-black tracking-[-0.05em] text-[var(--rt-ink)] sm:text-4xl">
-                Find people ready to talk nearby, {username}.
+    <main className="min-h-screen bg-[var(--rt-bg)] pb-10">
+      <div className="mx-auto flex w-full max-w-xl flex-col">
+
+        {/* ── Top header ── */}
+        <header className="sticky top-0 z-40 flex items-center justify-between border-b border-[var(--rt-border)] bg-[var(--rt-bg)]/90 px-4 py-3 backdrop-blur-md">
+          <p className="text-base font-black tracking-[-0.04em] text-[var(--rt-accent)]">TalkToMe</p>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={pendingAction === 'sign-out'}
+            className="rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-60"
+          >
+            {pendingAction === 'sign-out' ? '...' : 'Sign out'}
+          </button>
+        </header>
+
+        <div className="flex flex-col gap-4 px-4 pt-5">
+
+          {/* ── Hero section ── */}
+          {!selectedPlace ? (
+            <div className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Welcome back, {username}</p>
+              <h1 className="mt-2 text-2xl font-black leading-tight tracking-[-0.05em] text-[var(--rt-ink)]">
+                Open the door to a new connection.
               </h1>
-              <p className="mt-3 text-sm leading-6 text-[var(--rt-ink-soft)] sm:text-base">
-                Start with nearby places. Pick one that feels active, then add
-                a quick vibe before you join it.
+              <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
+                Share your vibe and find someone nearby ready to listen or chat.
               </p>
-            </div>
 
-            <button
-              type="button"
-              onClick={handleSignOut}
-              disabled={pendingAction === 'sign-out'}
-              className="shrink-0 rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pendingAction === 'sign-out' ? 'Signing out...' : 'Sign out'}
-            </button>
-          </div>
-
-          <div className="mt-5 rounded-[1.75rem] border border-[var(--rt-border)] bg-[linear-gradient(180deg,rgba(220,239,227,0.85),rgba(248,252,248,0.92))] p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                  Your location
-                </p>
-                <p className="mt-1 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Needed to show nearby places and keep conversations local.
-                </p>
-              </div>
-              {locationStatus === 'granted' ? (
-                <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-accent)]">
-                  Live
-                </span>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleEnableLocation}
-              disabled={locationStatus === 'requesting'}
-              className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {locationStatus === 'requesting'
-                ? 'Checking location...'
-                : locationStatus === 'granted'
+              {/* Location button */}
+              <button
+                type="button"
+                onClick={handleEnableLocation}
+                disabled={locationStatus === 'requesting'}
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:opacity-70"
+              >
+                <MapPin className="h-4 w-4" />
+                {locationStatus === 'requesting'
+                  ? 'Checking location...'
+                  : locationStatus === 'granted'
                   ? 'Refresh nearby places'
-                  : 'Enable location'}
-            </button>
+                  : 'Find places near me'}
+              </button>
 
-            {locationError ? (
-              <p className="mt-3 text-sm text-rose-700">{locationError}</p>
-            ) : null}
-          </div>
+              {locationError ? (
+                <p className="mt-3 text-xs text-rose-700">{locationError}</p>
+              ) : null}
 
-          {locationStatus === 'granted' && places.length > 0 ? (
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <ToplineMetric
-                label="Ready nearby"
-                value={String(totalReadyCount)}
-                detail="across nearby places"
-              />
-              <ToplineMetric
-                label="Most active"
-                value={busiestPlace?.readyCount ? String(busiestPlace.readyCount) : '0'}
-                detail={busiestPlace?.name ?? 'No place yet'}
-              />
+              {/* Privacy note */}
+              <p className="mt-3 text-center text-[10px] text-[var(--rt-ink-faint)]">
+                Your presence is only visible to people nearby
+              </p>
             </div>
           ) : null}
 
+          {/* ── Place chooser ── */}
           {isChoosingPlace ? (
-            <div className="mt-5">
+            <div className="flex flex-col gap-3">
               {placesLoading ? (
-                <div className="rounded-3xl border border-dashed border-[var(--rt-border)] bg-white/70 px-4 py-5 text-sm text-[var(--rt-ink-soft)]">
-                  Loading nearby places...
+                <div className="rounded-2xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface)] px-4 py-6 text-center text-sm text-[var(--rt-ink-soft)]">
+                  Finding nearby places...
                 </div>
               ) : null}
 
               {!placesLoading && places.length > 0 ? (
                 <>
-                  <NearbyPlacesMap
-                    places={places}
-                    selectedPlaceId={selectedPlaceId}
-                    locationCoords={locationCoords}
-                    onSelectPlace={setSelectedPlaceId}
-                  />
+                  {/* Quick stats */}
+                  {totalReadyCount > 0 ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-[var(--rt-accent-soft)] bg-[var(--rt-accent-soft)] px-4 py-3">
+                      <Users className="h-4 w-4 text-[var(--rt-accent)]" />
+                      <p className="text-sm font-semibold text-[var(--rt-accent)]">
+                        {totalReadyCount} {totalReadyCount === 1 ? 'person' : 'people'} ready to talk near you right now
+                      </p>
+                    </div>
+                  ) : null}
 
-                  <div className="mt-4 space-y-3">
+                  <Suspense fallback={null}>
+                    <NearbyPlacesMap
+                      places={places}
+                      selectedPlaceId={selectedPlaceId}
+                      locationCoords={locationCoords}
+                      onSelectPlace={setSelectedPlaceId}
+                    />
+                  </Suspense>
+
+                  <div className="space-y-2">
                     {places.map((place) => (
                       <PlaceChoiceCard
                         key={place.placeId}
@@ -430,244 +437,153 @@ export function OnboardingScreen({
                 </>
               ) : null}
 
-              {!placesLoading &&
-              locationStatus === 'granted' &&
-              places.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-[var(--rt-border)] bg-white/70 px-4 py-5 text-sm text-[var(--rt-ink-soft)]">
-                  No nearby place matched yet. Move closer to a cafe or venue
-                  and try again.
+              {!placesLoading && locationStatus === 'granted' && places.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface)] px-4 py-6 text-center text-sm text-[var(--rt-ink-soft)]">
+                  No nearby places found. Try moving closer to a café or venue.
                 </div>
               ) : null}
 
-              {placesError ? (
-                <p className="mt-3 text-sm text-rose-700">{placesError}</p>
-              ) : null}
+              {placesError ? <p className="text-sm text-rose-700">{placesError}</p> : null}
             </div>
           ) : null}
 
+          {/* ── Selected place + profile setup ── */}
           {selectedPlace ? (
-            <div className="mt-5 rounded-[1.75rem] border border-[var(--rt-border)] bg-white/86 p-4 sm:p-5">
+            <div className="flex flex-col gap-4">
+              {/* Back button */}
               <button
                 type="button"
                 onClick={() => setSelectedPlaceId(null)}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]"
+                className="inline-flex items-center gap-2 self-start rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface)] px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back to places
               </button>
 
-              <div className="mt-4 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] px-4 py-4">
+              {/* Selected place card */}
+              <div className="rounded-2xl border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] px-4 py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-lg font-semibold text-[var(--rt-ink)]">
-                      {selectedPlace.name}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                      {selectedPlace.address}
-                    </p>
+                    <p className="text-base font-bold text-[var(--rt-ink)]">{selectedPlace.name}</p>
+                    <p className="mt-0.5 text-sm text-[var(--rt-ink-soft)]">{selectedPlace.address}</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
-                    {selectedPlace.readyCount === 1
-                      ? '1 ready'
-                      : `${selectedPlace.readyCount} ready`}
+                    {selectedPlace.readyCount} ready
                   </span>
                 </div>
-              </div>
 
-              <div className="mt-4 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                      Place preview
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                      See how active it is before you join.
-                    </p>
-                  </div>
-                  {placePreview ? (
-                    <span className="shrink-0 rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
-                      {placePreview.checkedInCount} here now
-                    </span>
-                  ) : null}
-                </div>
-
-                {placePreviewLoading ? (
-                  <div className="mt-4 rounded-3xl border border-dashed border-[var(--rt-border)] bg-white px-4 py-5 text-sm text-[var(--rt-ink-soft)]">
-                    Loading place preview...
+                {/* Place preview */}
+                {placePreview && placePreview.readyParticipants.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {placePreview.readyParticipants.map((participant) => (
+                      <div key={participant.userId} className="rounded-xl border border-[var(--rt-border)] bg-white/90 px-3 py-2.5">
+                        <p className="text-sm font-semibold text-[var(--rt-ink)]">{participant.moodEmoji} {participant.username}</p>
+                        {participant.intentSummary ? (
+                          <p className="mt-0.5 text-xs text-[var(--rt-ink-soft)]">"{participant.intentSummary}"</p>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
                 ) : null}
-
-                {placePreview ? (
-                  <>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <PreviewMetricCard
-                        icon={<Users className="h-4 w-4" />}
-                        label="Ready"
-                        value={
-                          placePreview.readyCount === 1
-                            ? '1 person'
-                            : `${placePreview.readyCount} people`
-                        }
-                      />
-                      <PreviewMetricCard
-                        icon={<MessageCircle className="h-4 w-4" />}
-                        label="Talking"
-                        value={
-                          placePreview.activeConversationCount === 1
-                            ? '1 conversation'
-                            : `${placePreview.activeConversationCount} conversations`
-                        }
-                      />
-                    </div>
-
-                    <div className="mt-4">
-                      <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                        Ready to talk here
-                      </p>
-                      {placePreview.readyParticipants.length > 0 ? (
-                        <div className="mt-3 space-y-3">
-                          {placePreview.readyParticipants.map((participant) => (
-                            <div
-                              key={participant.userId}
-                              className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] px-4 py-4"
-                            >
-                              <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                                {participant.username}
-                              </p>
-                              <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                                {participant.moodEmoji}{' '}
-                                {participant.intentSummary ||
-                                  'Open to a nearby conversation.'}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="mt-3 rounded-3xl border border-dashed border-[var(--rt-border)] bg-white px-4 py-5 text-sm text-[var(--rt-ink-soft)]">
-                          No one is marked ready here right now.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : null}
-
-                {placePreviewError ? (
-                  <p className="mt-4 text-sm text-rose-700">
-                    {placePreviewError}
-                  </p>
-                ) : null}
+                {placePreviewLoading ? <p className="mt-2 text-xs text-[var(--rt-ink-faint)]">Loading preview...</p> : null}
               </div>
 
-              <div className="mt-4">
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                  Your vibe for this place
-                </p>
-                <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Keep it short. People nearby will see this before they talk to
-                  you.
-                </p>
-
-                <div className="mt-4 flex flex-wrap gap-3">
+              {/* ── CHOOSE YOUR CURRENT VIBE ── */}
+              <div className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Choose your current vibe</p>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {MOOD_OPTIONS.map((option) => {
-                    const isSelected = option === moodEmoji
-
+                    const isSelected = option.emoji === moodEmoji
                     return (
                       <button
-                        key={option}
+                        key={option.emoji}
                         type="button"
-                        onClick={() => setMoodEmoji(option)}
-                        className={`rounded-2xl border px-4 py-3 text-2xl transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.95] ${
+                        onClick={() => setMoodEmoji(option.emoji)}
+                        aria-pressed={isSelected}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-2 text-sm font-semibold transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.95] ${
                           isSelected
                             ? 'border-[var(--rt-accent)] bg-[var(--rt-accent)] text-white'
-                            : 'border-[var(--rt-border)] bg-white [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
+                            : 'border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
                         }`}
-                        aria-pressed={isSelected}
                       >
-                        {option}
+                        <span>{option.emoji}</span>
+                        <span>{option.label}</span>
                       </button>
                     )
                   })}
                 </div>
-
-                <label className="mt-4 block">
-                  <span className="mb-2 block text-sm font-medium text-[var(--rt-ink-soft)]">
-                    What do you want to talk about?
-                  </span>
-                  <textarea
-                    value={intentText}
-                    onChange={(event) => setIntentText(event.target.value)}
-                    rows={4}
-                    placeholder="Coffee break, startup ideas, a quiet walk, meeting someone new..."
-                    className="w-full rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-3 text-base text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)]"
-                  />
-                </label>
-
-                <p className="mt-4 text-sm text-[var(--rt-ink-soft)]">
-                  Joining <span className="font-medium text-[var(--rt-ink)]">{selectedPlace.name}</span>.
-                </p>
-
-                {saveError ? (
-                  <p className="mt-3 text-sm text-rose-700">{saveError}</p>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={handleSaveProfile}
-                  disabled={pendingAction === 'save' || placePreviewLoading}
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {pendingAction === 'save'
-                    ? 'Saving intro...'
-                    : 'Join this place'}
-                </button>
               </div>
+
+              {/* ── WHAT'S ON YOUR MIND ── */}
+              <div className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">What's on your mind?</p>
+                <textarea
+                  value={intentText}
+                  onChange={(e) => setIntentText(e.target.value)}
+                  rows={3}
+                  maxLength={120}
+                  placeholder="Coffee break, startup ideas, open to anything..."
+                  className="mt-2 w-full rounded-xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2.5 text-sm text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[var(--rt-ink-faint)] focus:border-[var(--rt-accent)] focus:ring-2 focus:ring-[var(--rt-accent-soft)]"
+                />
+                <p className="mt-1 text-right text-xs text-[var(--rt-ink-faint)]">{intentText.length}/120 · This helps others start a conversation with you.</p>
+              </div>
+
+              {/* ── INTEREST TAGS ── */}
+              <div className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Your interests <span className="normal-case font-normal">(pick up to 4)</span></p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {TAG_OPTIONS.map((tag) => {
+                    const isSelected = selectedTags.includes(tag)
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTags((prev) =>
+                            prev.includes(tag)
+                              ? prev.filter((t) => t !== tag)
+                              : prev.length < 4
+                              ? [...prev, tag]
+                              : prev,
+                          )
+                        }}
+                        aria-pressed={isSelected}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-[background-color,border-color,opacity,transform] duration-150 ease-out active:scale-[0.96] ${
+                          isSelected
+                            ? 'border-[var(--rt-accent)] bg-[var(--rt-accent)] text-white'
+                            : 'border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* ── CTA ── */}
+              {saveError ? (
+                <p className="text-sm text-rose-700">{saveError}</p>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={handleSaveProfile}
+                disabled={pendingAction === 'save' || placePreviewLoading}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--rt-accent)] px-5 py-3.5 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:opacity-70"
+              >
+                {pendingAction === 'save' ? 'Joining...' : 'Join the Space →'}
+              </button>
+
+              <p className="text-center text-xs text-[var(--rt-ink-faint)]">
+                Joining <span className="font-medium text-[var(--rt-ink-soft)]">{selectedPlace.name}</span>
+              </p>
             </div>
           ) : null}
-        </section>
+
+        </div>
       </div>
     </main>
-  )
-}
-
-function ToplineMetric({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: string
-  detail: string
-}) {
-  return (
-    <div className="rounded-3xl border border-[var(--rt-border)] bg-white/82 px-4 py-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-ink-soft)]">
-        {label}
-      </p>
-      <p className="mt-2 text-3xl font-black tracking-[-0.04em] text-[var(--rt-ink)]">
-        {value}
-      </p>
-      <p className="mt-1 text-sm leading-6 text-[var(--rt-ink-soft)]">{detail}</p>
-    </div>
-  )
-}
-
-function PreviewMetricCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] px-4 py-4">
-      <div className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-ink-soft)]">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-3 text-lg font-semibold text-[var(--rt-ink)]">{value}</p>
-    </div>
   )
 }
 

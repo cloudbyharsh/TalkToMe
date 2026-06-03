@@ -9,7 +9,6 @@ import {
   LocateFixed,
   MapPin,
   MessageCircle,
-  Radio,
   Send,
   Users,
   X,
@@ -304,18 +303,6 @@ export function PlaceViewScreen({
       if (b.userId === session.user.id) return 1
       return a.username.localeCompare(b.username)
     })
-  const findableParticipants = readyParticipants.filter(
-    (p) => p.userId !== session.user.id && p.isFindable,
-  )
-  const presentParticipants = liveParticipants.filter((p) => p.status === 'present')
-  const activeConversationCount =
-    livePlaceState?.placeId === currentPlace.place.placeId
-      ? livePlaceState.connections.length
-      : 0
-  const readyCount =
-    livePlaceState?.placeId === currentPlace.place.placeId
-      ? livePlaceState.readyCount
-      : currentPlace.readyCount
   const checkedInCount =
     livePlaceState?.placeId === currentPlace.place.placeId
       ? livePlaceState.checkedInCount
@@ -722,54 +709,158 @@ export function PlaceViewScreen({
   }
 
   return (
-    <main className="min-h-screen px-4 py-5 sm:px-6">
-      <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] w-full max-w-xl flex-col gap-4">
-        <section className="rounded-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface)] p-5 shadow-[0_28px_80px_rgba(17,52,44,0.12)] backdrop-blur-xl sm:p-6">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] px-4 py-2 text-sm font-medium text-[var(--rt-accent)] shadow-sm">
-            <Radio className="h-4 w-4" />
-            Live place
+    <main className="min-h-screen bg-[var(--rt-bg)] pb-24">
+      <div className="mx-auto flex w-full max-w-xl flex-col">
+
+        {/* ── Top header ── */}
+        <header className="sticky top-0 z-40 flex items-center justify-between border-b border-[var(--rt-border)] bg-[var(--rt-bg)]/90 px-4 py-3 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={handleLeavePlace}
+            disabled={pendingAction === 'leave'}
+            className="flex items-center gap-2 rounded-full p-1.5 text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.95] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:opacity-50"
+            aria-label="Back to places"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="text-center">
+            <p className="text-sm font-black tracking-[-0.03em] text-[var(--rt-ink)]">
+              {currentPlace.place.name}
+            </p>
+            <p className="text-xs text-[var(--rt-ink-faint)]">{currentPlace.place.address}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={pendingAction === 'sign-out'}
+            className="rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:opacity-60"
+          >
+            {pendingAction === 'sign-out' ? '...' : 'Sign out'}
+          </button>
+        </header>
+
+        <div className="flex flex-col gap-4 px-4 pt-4">
+        {/* ── Status toggles — 2-col grid ── */}
+        <section className="grid grid-cols-2 gap-3">
+          {/* Ready toggle */}
+          <div className={`rounded-2xl border p-4 transition-[border-color,background-color] duration-200 ${isReady ? 'border-[var(--rt-accent)] bg-[var(--rt-accent-soft)]' : 'border-[var(--rt-border)] bg-[var(--rt-surface)]'}`}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Status</p>
+            <p className={`mt-1 text-sm font-bold ${isReady ? 'text-[var(--rt-accent)]' : 'text-[var(--rt-ink)]'}`}>
+              {isInConversation ? 'Talking' : isReady ? 'Ready to Talk' : 'Not Ready'}
+            </p>
+            <label className="mt-3 flex cursor-pointer items-center">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={isInConversation ? true : isReady}
+                  disabled={isInConversation || pendingAction === 'ready'}
+                  onChange={() => void handleReadyToggle()}
+                />
+                <div className={`h-6 w-11 rounded-full transition-colors duration-200 ${(isReady || isInConversation) ? 'bg-[var(--rt-accent)]' : 'bg-[var(--rt-border)]'}`} />
+                <div className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${(isReady || isInConversation) ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+            </label>
           </div>
 
-          <h1 className="mt-5 text-4xl font-black leading-none tracking-[-0.05em] text-[var(--rt-ink)] sm:text-5xl">
-            {currentPlace.place.name}
-          </h1>
-          <p className="mt-4 max-w-xl text-base leading-7 text-[var(--rt-ink-soft)] sm:text-lg">
-            You are here as {username}. Go ready when you want to meet someone,
-            then send a request to talk to start the conversation.
-          </p>
-
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            <MetricCard
-              icon={<Users className="h-5 w-5" />}
-              label="Ready right now"
-              value={String(readyCount)}
-              tone="amber"
-            />
-            <MetricCard
-              icon={<Radio className="h-5 w-5" />}
-              label="Checked in now"
-              value={String(checkedInCount)}
-              tone="slate"
-            />
-            <MetricCard
-              icon={<MapPin className="h-5 w-5" />}
-              label="Your state"
-              value={isInConversation ? 'Talking' : isReady ? 'Ready' : 'Present'}
-              tone={isInConversation ? 'amber' : isReady ? 'emerald' : 'slate'}
-            />
+          {/* Finder toggle */}
+          <div className={`rounded-2xl border p-4 transition-[border-color,background-color] duration-200 ${isFindable ? 'border-[var(--rt-accent)] bg-[var(--rt-accent-soft)]' : 'border-[var(--rt-border)] bg-[var(--rt-surface)]'}`}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Visibility</p>
+            <p className={`mt-1 text-sm font-bold ${isFindable ? 'text-[var(--rt-accent)]' : 'text-[var(--rt-ink)]'}`}>
+              {isFindable ? 'Findable' : 'Finder Mode'}
+            </p>
+            <label className="mt-3 flex cursor-pointer items-center">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={isFindable}
+                  disabled={!isReady || isInConversation || pendingAction === 'finder'}
+                  onChange={() => void handleFinderToggle()}
+                />
+                <div className={`h-6 w-11 rounded-full transition-colors duration-200 ${isFindable ? 'bg-[var(--rt-accent)]' : 'bg-[var(--rt-border)]'}`} />
+                <div className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${isFindable ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+            </label>
           </div>
+        </section>
 
-          <div className="mt-8 rounded-[2rem] border border-[var(--rt-border)] bg-white/82 p-6 shadow-sm">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--rt-ink-soft)]">
-              Your intro
-            </p>
-            <p className="mt-4 text-2xl font-semibold text-[var(--rt-ink)]">
-              {profile.moodEmoji} {profile.intentSummary}
-            </p>
-            <p className="mt-3 text-sm leading-6 text-[var(--rt-ink-soft)]">
-              {currentPlace.place.address}
-            </p>
+        {/* ── Conversation notice ── */}
+        {conversationNotice ? (
+          <div className="rt-conversation-notice flex items-start gap-3 rounded-2xl border p-4">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 opacity-90" />
+            <div>
+              <p className="text-sm font-semibold">{conversationNotice.title}</p>
+              <p className="mt-0.5 text-sm leading-5 opacity-90">{conversationNotice.description}</p>
+            </div>
           </div>
+        ) : null}
+
+        {/* ── Finder hint chips ── */}
+        {isReady && !isInConversation ? (
+          <div className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4">
+            <div className="flex items-center gap-2">
+              <LocateFixed className="h-4 w-4 text-[var(--rt-accent)]" />
+              <p className="text-sm font-semibold text-[var(--rt-ink)]">Where are you sitting?</p>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {finderHintOptions.map((hint) => {
+                const isSelected = selectedFinderHint === hint
+                return (
+                  <button
+                    key={hint}
+                    type="button"
+                    onClick={() => void handleSelectFinderHint(hint)}
+                    disabled={pendingAction === 'finder'}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96] ${
+                      isSelected
+                        ? 'bg-[var(--rt-accent)] text-white'
+                        : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)]'
+                    } disabled:opacity-60`}
+                  >
+                    {hint}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Incoming connect requests ── */}
+        {pendingIncomingRequests.length > 0 ? (
+          <div className="rt-notice rounded-2xl border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] p-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl border border-[var(--rt-accent)] bg-white p-2 text-[var(--rt-accent)]">
+                <MessageCircle className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[var(--rt-ink)]">
+                  {pendingIncomingRequests.length === 1 ? '1 request to talk' : `${pendingIncomingRequests.length} requests to talk`}
+                </p>
+                <p className="text-xs text-[var(--rt-ink-soft)]">Accept or decline below</p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              {pendingIncomingRequests.map((req) => (
+                <IncomingRequestCard
+                  key={req.id}
+                  request={req}
+                  currentUserId={session.user.id}
+                  isResponding={respondingRequestId === req.id}
+                  isSendingReply={pendingReplyRequestId === req.id}
+                  replyDraft={replyDrafts[req.id] ?? ''}
+                  replyError={replyError}
+                  onReplyDraftChange={(val) => setReplyDrafts((prev) => ({ ...prev, [req.id]: val }))}
+                  onSendReply={() => void handleSendReply(req.id)}
+                  onAccept={() => void handleRespondToRequest(req.id, true)}
+                  onReject={() => void handleRespondToRequest(req.id, false)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Active conversation panel ── */}
 
           {/* Incoming connect requests */}
           {pendingIncomingRequests.length > 0 ? (
@@ -812,392 +903,163 @@ export function PlaceViewScreen({
             </div>
           ) : null}
 
-          {/* Who is ready here */}
-          <div className="mt-6 rounded-[2rem] border border-[var(--rt-border)] bg-white/82 p-6 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--rt-ink-soft)]">
-                  Who is ready here
-                </p>
-                <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Tap Request to talk on someone to send them an intro and start the conversation.
-                </p>
-              </div>
-              <div className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-sm font-semibold text-[var(--rt-accent)]">
-                {readyCount} ready
-              </div>
-            </div>
-
-            {readyParticipants.length > 0 ? (
-              <div className="mt-5 space-y-3">
-                {readyParticipants.map((participant, index) => (
-                  <PresencePersonCard
-                    key={participant.userId}
-                    participant={participant}
-                    isCurrentUser={participant.userId === session.user.id}
-                    isInConversation={isInConversation}
-                    staggerIndex={index}
-                    onConnect={
-                      participant.userId === session.user.id || isInConversation
-                        ? null
-                        : () => handleOpenConnectModal(participant)
-                    }
-                    onPing={
-                      participant.userId === session.user.id || !participant.isFindable
-                        ? null
-                        : () => void handlePingParticipant(participant)
-                    }
-                    isPinging={pendingPingUserId === participant.userId}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="rt-card-stagger mt-5 flex flex-col items-center gap-2 rounded-3xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-8 text-center">
-                <Users className="h-5 w-5 text-[var(--rt-border-strong)]" />
-                <p className="text-sm text-[var(--rt-ink-soft)]">No one is ready here yet.</p>
-                <p className="text-xs text-[var(--rt-ink-soft)]/70">Set yourself ready above to be the first.</p>
-              </div>
-            )}
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <PresenceSummaryCard
-                label="Taking a moment"
-                count={presentParticipants.length}
-                description="Checked in here, but not in the ready pool."
-              />
-              <PresenceSummaryCard
-                label="Talking now"
-                count={activeConversationCount}
-                description="Active conversations happening in this place."
-              />
-              <PresenceSummaryCard
-                label="Easy to find"
-                count={findableParticipants.length}
-                description="Ready people who shared a spot and can be pinged."
-              />
-            </div>
+        {/* ── Happening Now — presence list ── */}
+        <section className="rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-black tracking-[-0.03em] text-[var(--rt-ink)]">Happening Now</h2>
+            <span className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
+              {checkedInCount} Active
+            </span>
           </div>
+
+          {readyParticipants.length > 0 ? (
+            <div className="mt-3 space-y-3">
+              {readyParticipants.map((participant, index) => (
+                <PresencePersonCard
+                  key={participant.userId}
+                  participant={participant}
+                  isCurrentUser={participant.userId === session.user.id}
+                  isInConversation={isInConversation}
+                  staggerIndex={index}
+                  onConnect={
+                    participant.userId === session.user.id || isInConversation
+                      ? null
+                      : () => handleOpenConnectModal(participant)
+                  }
+                  onPing={
+                    participant.userId === session.user.id || !participant.isFindable
+                      ? null
+                      : () => void handlePingParticipant(participant)
+                  }
+                  isPinging={pendingPingUserId === participant.userId}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rt-card-stagger mt-3 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-8 text-center">
+              <Users className="h-5 w-5 text-[var(--rt-border-strong)]" />
+              <p className="text-sm font-medium text-[var(--rt-ink-soft)]">No one is ready here yet.</p>
+              <p className="text-xs text-[var(--rt-ink-faint)]">Toggle Ready above to be the first.</p>
+            </div>
+          )}
         </section>
 
-        <section className="rounded-[2rem] border border-[var(--rt-border)] bg-[var(--rt-surface)] p-6 shadow-[0_24px_80px_rgba(17,52,44,0.12)] sm:p-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm uppercase tracking-[0.24em] text-[var(--rt-accent)]">
-                Place View
-              </p>
-              <h2 className="mt-2 text-3xl font-bold text-[var(--rt-ink)]">
-                Ready when you want
-              </h2>
+        {/* ── Active conversation ── */}
+        {resolvedActiveConnection ? (
+          <div className="rt-connection-accepted rounded-2xl border border-[var(--rt-accent)] bg-[var(--rt-accent-soft)] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-[var(--rt-accent)]">
+                <MessageCircle className="h-4 w-4" />
+                <p className="text-xs font-semibold uppercase tracking-[0.14em]">You are talking now</p>
+              </div>
+              {conversationElapsed ? (
+                <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-[var(--rt-accent)]">
+                  {conversationElapsed}
+                </span>
+              ) : null}
             </div>
-
-            <button
-              type="button"
-              onClick={handleSignOut}
-              disabled={pendingAction === 'sign-out'}
-              className="rounded-full border border-[var(--rt-border)] bg-white/80 px-4 py-2 text-sm font-medium text-[var(--rt-ink-soft)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pendingAction === 'sign-out' ? 'Signing out...' : 'Sign out'}
-            </button>
-          </div>
-
-          <div className="mt-6 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-accent-soft)] p-5">
-            <p className="text-sm font-semibold text-[var(--rt-ink)]">Status</p>
-            <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-              {isInConversation
-                ? `You are currently talking${resolvedActiveConnection ? ` with ${resolvedActiveConnection.counterpart.username}` : ''}.`
-                : isReady
-                ? 'You are visible in the ready count. Others can send you a request to talk.'
-                : 'You are present here, but not yet in the ready count.'}
+            <p className="mt-2 text-lg font-black tracking-[-0.03em] text-[var(--rt-ink)]">
+              {resolvedActiveConnection.counterpart.username}
+            </p>
+            <p className="mt-0.5 text-sm text-[var(--rt-ink-soft)]">
+              {resolvedActiveConnection.counterpart.moodEmoji}{' '}
+              {resolvedActiveConnection.counterpart.intentSummary}
             </p>
 
-            {isInConversation ? (
-              <button
-                type="button"
-                onClick={handleEndConnection}
-                disabled={pendingAction === 'end-connection'}
-                className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {pendingAction === 'end-connection' ? 'Ending conversation...' : 'I am free again'}
+            {/* Live chat thread */}
+            <div className="mt-3 rounded-xl border border-[var(--rt-border)] bg-white p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-faint)]">Chat</p>
+              {activeConnectionThread ? (
+                <>
+                  {activeConnectionThread.introMessage ? (
+                    <div className="mb-2 flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)]">
+                        {activeConnectionThread.introMessage}
+                      </div>
+                    </div>
+                  ) : null}
+                  {activeConnectionThread.messages.map((msg) => (
+                    <div key={msg.id} className={`mb-2 flex ${msg.senderUserId === session.user.id ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${msg.senderUserId === session.user.id ? 'bg-[var(--rt-accent)] text-white' : 'border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] text-[var(--rt-ink)]'}`}>
+                        {msg.body}
+                      </div>
+                    </div>
+                  ))}
+                  {activeConnectionThread.myMessageCount < MAX_MESSAGES_PER_USER ? (
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="text"
+                        value={activeConnectionDraft}
+                        onChange={(e) => setActiveConnectionDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && activeConnectionDraft.trim()) { e.preventDefault(); void handleSendActiveConnectionMessage() } }}
+                        maxLength={240}
+                        placeholder="Message…"
+                        disabled={isSendingActiveMessage}
+                        className="flex-1 rounded-xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out focus:border-[var(--rt-accent)] focus:ring-2 focus:ring-[var(--rt-accent-soft)] disabled:opacity-60"
+                      />
+                      <button type="button" onClick={() => void handleSendActiveConnectionMessage()} disabled={isSendingActiveMessage || !activeConnectionDraft.trim()} className="inline-flex items-center justify-center rounded-xl bg-[var(--rt-accent)] px-3 py-2 text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:opacity-60" aria-label="Send">
+                        <Send className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-[var(--rt-ink-faint)]">Message limit reached for this thread.</p>
+                  )}
+                  {activeMessageError ? <p className="mt-1 text-xs text-rose-600">{activeMessageError}</p> : null}
+                </>
+              ) : (
+                <p className="text-sm text-[var(--rt-ink-soft)]">No messages yet.</p>
+              )}
+            </div>
+
+            <button type="button" onClick={handleEndConnection} disabled={pendingAction === 'end-connection'} className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-[var(--rt-accent)] px-4 py-2.5 text-sm font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:opacity-70">
+              {pendingAction === 'end-connection' ? 'Ending...' : 'I am free again'}
+            </button>
+          </div>
+        ) : null}
+
+        {/* ── Finder notice ── */}
+        {finderNotice ? (
+          <div className="rt-notice rounded-2xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-4 text-[var(--rt-ink)]">
+            <p className="text-sm font-semibold">{finderNotice.title}</p>
+            <p className="mt-1 text-sm">{finderNotice.description}</p>
+          </div>
+        ) : null}
+
+        {/* ── Motion shortcut ── */}
+        {!isInConversation && motionAccessState !== 'active' && motionAccessState !== 'unavailable' ? (
+          <div className="rounded-2xl border border-dashed border-[var(--rt-border)] bg-[var(--rt-surface)] p-4">
+            <p className="text-sm font-semibold text-[var(--rt-ink)]">Phone flip shortcut</p>
+            <p className="mt-1 text-sm text-[var(--rt-ink-soft)]">Allow motion access so flipping your phone face-down quietly takes you out of the ready pool.</p>
+            {motionAccessState !== 'requesting' ? (
+              <button type="button" onClick={() => void handleEnableMotionAccess()} className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97]">
+                {motionAccessState === 'denied' ? 'Try again' : 'Enable shortcut'}
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleReadyToggle}
-                disabled={pendingAction === 'ready'}
-                className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 ${
-                  isReady
-                    ? 'bg-rose-500 hover:bg-rose-600'
-                    : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
-                }`}
-              >
-                {pendingAction === 'ready'
-                  ? 'Updating status...'
-                  : isReady
-                  ? 'Leave ready pool'
-                  : 'Set me ready'}
-              </button>
-            )}
-
-            {!isInConversation ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-[var(--rt-border)] bg-white px-4 py-4">
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">Phone flip shortcut</p>
-                <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  {motionAccessState === 'active'
-                    ? isReady
-                      ? 'Flip your phone face-down for a moment to leave the ready pool without tapping.'
-                      : 'When you are ready, flipping your phone face-down can take you back out of the ready pool.'
-                    : motionAccessState === 'needs-permission' || motionAccessState === 'requesting'
-                    ? 'Allow motion access once so turning your phone face-down can quietly take you out of the ready pool.'
-                    : motionAccessState === 'denied'
-                    ? 'Motion access is still off, so face-down detection cannot change your status yet.'
-                    : 'Face-down detection is not available in this browser.'}
-                </p>
-
-                {(motionAccessState === 'needs-permission' ||
-                  motionAccessState === 'requesting' ||
-                  motionAccessState === 'denied') && (
-                  <button
-                    type="button"
-                    onClick={() => void handleEnableMotionAccess()}
-                    disabled={motionAccessState === 'requesting'}
-                    className="mt-4 inline-flex items-center justify-center rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-2 text-sm font-medium text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {motionAccessState === 'requesting'
-                      ? 'Enabling motion access...'
-                      : motionAccessState === 'denied'
-                      ? 'Try motion access again'
-                      : 'Enable face-down shortcut'}
-                  </button>
-                )}
-
-                {motionNotice ? (
-                  <p className="mt-3 text-sm font-medium text-[var(--rt-accent)]">{motionNotice}</p>
-                ) : null}
-              </div>
             ) : null}
           </div>
+        ) : null}
+        {motionNotice ? <p className="text-sm font-medium text-[var(--rt-accent)]">{motionNotice}</p> : null}
 
-          {conversationNotice ? (
-            <div className="rt-conversation-notice mt-6 flex items-start gap-3 rounded-3xl border p-5">
-              <Check className="mt-0.5 h-4 w-4 shrink-0 opacity-90" />
-              <div>
-                <p className="text-sm font-semibold">{conversationNotice.title}</p>
-                <p className="mt-1 text-sm leading-6 opacity-90">{conversationNotice.description}</p>
-              </div>
-            </div>
-          ) : null}
-
-          {finderNotice ? (
-            <div className="rt-notice mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5 text-[var(--rt-ink)]">
-              <p className="text-sm font-semibold">{finderNotice.title}</p>
-              <p className="mt-2 text-sm leading-6">{finderNotice.description}</p>
-            </div>
-          ) : null}
-
-          <div className="mt-6 rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] p-5">
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl border border-[var(--rt-border)] bg-white p-3 text-[var(--rt-accent)]">
-                <LocateFixed className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-[var(--rt-ink)]">Help someone find you</p>
-                <p className="text-sm leading-6 text-[var(--rt-ink-soft)]">
-                  Share one simple spot in this place so someone can look for you before connecting.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              {finderHintOptions.map((hint) => {
-                const isSelected = selectedFinderHint === hint
-                return (
-                  <button
-                    key={hint}
-                    type="button"
-                    onClick={() => void handleSelectFinderHint(hint)}
-                    disabled={!isReady || isInConversation || pendingAction === 'finder'}
-                    className={`rounded-full px-4 py-2 text-sm font-medium transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96] ${
-                      isSelected
-                        ? 'bg-[var(--rt-accent)] text-white'
-                        : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink-soft)] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] [@media(hover:hover)_and_(pointer:fine)]:hover:text-[var(--rt-ink)]'
-                    } disabled:cursor-not-allowed disabled:opacity-60`}
-                  >
-                    {hint}
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-4">
-              <p className="text-sm font-semibold text-[var(--rt-ink)]">
-                {isFindable
-                  ? `Currently sharing: ${selectedFinderHint}`
-                  : isInConversation
-                  ? 'Finder mode pauses while you are talking.'
-                  : isReady
-                  ? 'Pick the spot that best matches where you are.'
-                  : 'Set yourself ready before sharing a spot.'}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                {isFindable
-                  ? 'People nearby can look for this hint and send a quick cue to your phone.'
-                  : 'This stays off until you choose to share it.'}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void handleFinderToggle()}
-              disabled={!isReady || isInConversation || pendingAction === 'finder'}
-              className={`mt-4 inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 ${
-                isFindable
-                  ? 'bg-rose-500 hover:bg-rose-600'
-                  : 'bg-[var(--rt-accent)] hover:bg-[var(--rt-accent-strong)]'
-              }`}
-            >
-              {pendingAction === 'finder'
-                ? 'Saving finder settings...'
-                : isFindable
-                ? 'Stop sharing my spot'
-                : 'Help someone find me'}
-            </button>
+        {/* ── Error banner ── */}
+        {error ? (
+          <div className="rt-notice flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            {error}
           </div>
+        ) : null}
 
-          {resolvedActiveConnection ? (
-            <div className="rt-connection-accepted mt-6 rounded-3xl border border-[var(--rt-border-strong)] bg-[var(--rt-accent-soft)] p-5">
-              <div className="flex items-center justify-between gap-3 text-[var(--rt-accent)]">
-                <div className="flex items-center gap-3">
-                  <MessageCircle className="h-5 w-5" />
-                  <p className="text-sm font-semibold">Current conversation</p>
-                </div>
-                {conversationElapsed ? (
-                  <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--rt-accent)]">
-                    {conversationElapsed}
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-3 text-xl font-semibold text-[var(--rt-ink)]">
-                {resolvedActiveConnection.counterpart.username}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-                {resolvedActiveConnection.counterpart.moodEmoji}{' '}
-                {resolvedActiveConnection.counterpart.intentSummary}
-              </p>
-              <p className="mt-3 text-sm leading-6 text-[var(--rt-accent)]/80">
-                Take your time. Either person can end the conversation, and you will
-                both return to ready automatically.
-              </p>
+        {/* Spacer for bottom nav */}
+        <div className="h-4" />
+        </div>{/* end inner flex col */}
+      </div>{/* end main */}
 
-              {/* Live chat thread — stays visible and accepts new messages after acceptance */}
-              <div className="mt-4 rounded-2xl border border-[var(--rt-border)] bg-white/70 p-4">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-soft)]">
-                  Chat
-                </p>
-
-                {activeConnectionThread ? (
-                  <>
-                    {/* Intro message (sent with the original request) */}
-                    {activeConnectionThread.introMessage ? (
-                      <div className="mb-2 flex justify-start">
-                        <div className="max-w-[85%] rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm leading-6 text-[var(--rt-ink)]">
-                          {activeConnectionThread.introMessage}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Thread messages */}
-                    {activeConnectionThread.messages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className={`mb-2 flex ${msg.senderUserId === session.user.id ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
-                            msg.senderUserId === session.user.id
-                              ? 'bg-[var(--rt-accent)] text-white'
-                              : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink)]'
-                          }`}
-                        >
-                          {msg.body}
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Send input — shown while under the message limit */}
-                    {activeConnectionThread.myMessageCount < MAX_MESSAGES_PER_USER ? (
-                      <div className="mt-3">
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={activeConnectionDraft}
-                            onChange={(e) => setActiveConnectionDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (
-                                e.key === 'Enter' &&
-                                !e.shiftKey &&
-                                activeConnectionDraft.trim()
-                              ) {
-                                e.preventDefault()
-                                void handleSendActiveConnectionMessage()
-                              }
-                            }}
-                            maxLength={240}
-                            placeholder="Send a message…"
-                            disabled={isSendingActiveMessage}
-                            className="flex-1 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void handleSendActiveConnectionMessage()}
-                            disabled={isSendingActiveMessage || !activeConnectionDraft.trim()}
-                            className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-3 py-2 text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                            aria-label="Send message"
-                          >
-                            <Send className="h-4 w-4" />
-                          </button>
-                        </div>
-                        {activeMessageError ? (
-                          <p className="mt-2 text-xs text-rose-600">{activeMessageError}</p>
-                        ) : null}
-                        <p className="mt-2 text-right text-xs text-[var(--rt-ink-soft)]">
-                          {activeConnectionThread.myMessageCount} of {MAX_MESSAGES_PER_USER} messages used
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-xs text-[var(--rt-ink-soft)]">
-                        You've reached the {MAX_MESSAGES_PER_USER}-message limit for this thread.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-sm text-[var(--rt-ink-soft)]">
-                    No messages yet. Say something to break the ice.
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <button
-              type="button"
-              onClick={handleLeavePlace}
-              disabled={pendingAction === 'leave'}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--rt-border)] bg-white px-5 py-3 font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {pendingAction === 'leave' ? 'Leaving place...' : 'Switch place'}
-            </button>
-          </div>
-
-          {error ? (
-            <div className="rt-notice mt-4 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {error}
-            </div>
-          ) : null}
-        </section>
-      </div>
+      {/* ── Bottom navigation ── */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--rt-border)] bg-[var(--rt-bg)]/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-xl items-center justify-around px-2 py-2">
+          <NavTab icon={<MapPin className="h-5 w-5" />} label="Places" active />
+          <NavTab icon={<MessageCircle className="h-5 w-5" />} label="Requests" badge={pendingIncomingRequests.length} />
+          <NavTab icon={<Users className="h-5 w-5" />} label="People" />
+        </div>
+      </nav>
 
       {/* Request to talk modal */}
       {connectModalTarget ? (
@@ -1282,34 +1144,6 @@ export function PlaceViewScreen({
         </div>
       ) : null}
     </main>
-  )
-}
-
-function MetricCard({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-  tone: 'amber' | 'emerald' | 'slate'
-}) {
-  const styles = {
-    amber: 'border-[var(--rt-border)] bg-[var(--rt-accent-soft)] text-[var(--rt-accent)]',
-    emerald: 'border-[var(--rt-border)] bg-[color:rgba(79,70,229,0.10)] text-[var(--rt-accent)]',
-    slate: 'border-[var(--rt-border)] bg-white text-[var(--rt-ink)]',
-  }[tone]
-
-  return (
-    <div className={`rounded-[2rem] border p-5 shadow-sm ${styles}`}>
-      <div className="inline-flex rounded-2xl border border-current/10 bg-white/70 p-3">
-        {icon}
-      </div>
-      <p className="mt-4 text-sm font-medium">{label}</p>
-      <p key={value} className="rt-number-pop mt-2 text-4xl font-black tracking-[-0.04em]">{value}</p>
-    </div>
   )
 }
 
@@ -1484,51 +1318,58 @@ function PresencePersonCard({
 }) {
   return (
     <div
-      className="rt-card-stagger rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4"
+      className="rt-card-stagger rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface)] p-4 shadow-sm backdrop-blur-sm"
       style={{ animationDelay: `${staggerIndex * 50}ms` }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-base font-semibold text-[var(--rt-ink)]">
-            {participant.username}
+        {/* Avatar circle */}
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--rt-accent-soft)] text-lg">
+          {participant.moodEmoji || '👤'}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-bold text-[var(--rt-ink)]">{participant.username}</p>
             {isCurrentUser ? (
-              <span className="ml-2 rounded-full bg-[var(--rt-accent)] px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-white">
-                You
-              </span>
+              <span className="shrink-0 rounded-full bg-[var(--rt-accent)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white">You</span>
             ) : null}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">
-            {participant.moodEmoji} {participant.intentSummary || 'Open to a nearby conversation.'}
-          </p>
+          </div>
+          {participant.intentSummary ? (
+            <p className="mt-0.5 text-sm leading-5 text-[var(--rt-ink-soft)]">"{participant.intentSummary}"</p>
+          ) : null}
           {participant.isFindable && participant.locationHint ? (
-            <p className="mt-2 text-sm font-medium text-[var(--rt-accent)]">
-              Near {participant.locationHint.toLowerCase()}
+            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-[var(--rt-accent)]">
+              <LocateFixed className="h-3 w-3" />
+              {participant.locationHint}
             </p>
+          ) : null}
+          {/* Interest tags */}
+          {participant.tags && participant.tags.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {participant.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-2 py-0.5 text-[10px] font-semibold text-[var(--rt-ink-soft)]"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <span className="rounded-full bg-[var(--rt-accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--rt-accent)]">
+          <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${participant.isFindable ? 'bg-[var(--rt-accent)] text-white' : 'bg-[var(--rt-accent-soft)] text-[var(--rt-accent)]'}`}>
             {participant.isFindable ? 'Findable' : 'Ready'}
           </span>
-          {onConnect && !isCurrentUser ? (
-            <button
-              type="button"
-              onClick={onConnect}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)]"
-            >
+          {onConnect ? (
+            <button type="button" onClick={onConnect} className="inline-flex items-center gap-1 rounded-full bg-[var(--rt-accent)] px-3 py-1.5 text-xs font-semibold text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)]">
               <Send className="h-3 w-3" />
-              Request to talk
+              Talk
             </button>
           ) : null}
           {onPing ? (
-            <button
-              type="button"
-              onClick={onPing}
-              disabled={isPinging}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--rt-border)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)_and_(pointer:fine)]:hover:border-[var(--rt-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <BellRing className={`h-3.5 w-3.5${isPinging ? ' rt-bell-ring' : ''}`} />
-              {isPinging ? 'Pinging...' : 'Ping me'}
+            <button type="button" onClick={onPing} disabled={isPinging} className="inline-flex items-center gap-1 rounded-full border border-[var(--rt-border)] bg-white px-2.5 py-1.5 text-xs font-semibold text-[var(--rt-ink)] transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-60">
+              <BellRing className={`h-3 w-3${isPinging ? ' rt-bell-ring' : ''}`} />
+              {isPinging ? '...' : 'Ping'}
             </button>
           ) : null}
         </div>
@@ -1537,21 +1378,32 @@ function PresencePersonCard({
   )
 }
 
-function PresenceSummaryCard({
+function NavTab({
+  icon,
   label,
-  count,
-  description,
+  active = false,
+  badge = 0,
 }: {
+  icon: ReactNode
   label: string
-  count: number
-  description: string
+  active?: boolean
+  badge?: number
 }) {
   return (
-    <div className="rounded-3xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-4 py-4">
-      <p className="text-sm font-semibold text-[var(--rt-ink)]">{label}</p>
-      <p className="mt-2 text-3xl font-black tracking-[-0.04em] text-[var(--rt-ink)]">{count}</p>
-      <p className="mt-2 text-sm leading-6 text-[var(--rt-ink-soft)]">{description}</p>
-    </div>
+    <button
+      type="button"
+      className={`relative flex flex-col items-center gap-0.5 px-5 py-2 transition-[color,opacity,transform] duration-150 ease-out active:scale-[0.95] ${active ? 'text-[var(--rt-accent)]' : 'text-[var(--rt-ink-faint)]'}`}
+    >
+      <div className="relative">
+        {icon}
+        {badge > 0 ? (
+          <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--rt-accent)] text-[9px] font-bold text-white">
+            {badge}
+          </span>
+        ) : null}
+      </div>
+      <span className={`text-[10px] font-semibold uppercase tracking-[0.1em] ${active ? 'text-[var(--rt-accent)]' : 'text-[var(--rt-ink-faint)]'}`}>{label}</span>
+    </button>
   )
 }
 

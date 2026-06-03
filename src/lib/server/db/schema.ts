@@ -107,6 +107,8 @@ export const userProfile = sqliteTable('user_profile', {
     .notNull()
     .default(false),
   locationHint: text('location_hint'),
+  /** JSON array of interest tag strings e.g. '["Tech","Design"]'. Max 4 tags. */
+  tags: text('tags'),
   pingRequestedAt: integer('ping_requested_at', { mode: 'timestamp_ms' }),
   pingRequestedByUserId: text('ping_requested_by_user_id'),
   pingRequestedByUsername: text('ping_requested_by_username'),

@@ -39,6 +39,7 @@ async function loadPlaceSnapshot(
       status: userProfile.status,
       isFindable: userProfile.isFindable,
       locationHint: userProfile.locationHint,
+      tags: userProfile.tags,
       pingRequestedAt: userProfile.pingRequestedAt,
       pingRequestedByUserId: userProfile.pingRequestedByUserId,
       pingRequestedByUsername: userProfile.pingRequestedByUsername,
@@ -71,19 +72,29 @@ async function loadPlaceSnapshot(
     placeId,
     readyCount,
     checkedInCount,
-    participants: participantRecords.map((record) => ({
-      userId: record.userId,
-      username:
-        record.username || record.fallbackUsername || record.fallbackName,
-      moodEmoji: record.moodEmoji,
-      intentSummary: record.intentSummary,
-      status: record.status as PlaceAgentState['participants'][number]['status'],
-      isFindable: record.isFindable ?? false,
-      locationHint: record.locationHint,
-      pingRequestedAt: record.pingRequestedAt?.toISOString() ?? null,
-      pingRequestedByUserId: record.pingRequestedByUserId,
-      pingRequestedByUsername: record.pingRequestedByUsername,
-    })),
+    participants: participantRecords.map((record) => {
+      let tags: string[] = []
+      if (record.tags) {
+        try {
+          const parsed = JSON.parse(record.tags)
+          if (Array.isArray(parsed)) tags = parsed.filter((t): t is string => typeof t === 'string')
+        } catch { /* ignore */ }
+      }
+      return {
+        userId: record.userId,
+        username:
+          record.username || record.fallbackUsername || record.fallbackName,
+        moodEmoji: record.moodEmoji,
+        intentSummary: record.intentSummary,
+        status: record.status as PlaceAgentState['participants'][number]['status'],
+        isFindable: record.isFindable ?? false,
+        locationHint: record.locationHint,
+        tags,
+        pingRequestedAt: record.pingRequestedAt?.toISOString() ?? null,
+        pingRequestedByUserId: record.pingRequestedByUserId,
+        pingRequestedByUsername: record.pingRequestedByUsername,
+      }
+    }),
     connections: connectionRecords.map((record) => ({
       ...record,
       createdAt: record.createdAt.toISOString(),

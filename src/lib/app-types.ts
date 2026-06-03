@@ -25,6 +25,7 @@ export type UserProfileState = {
   currentPlaceId: string | null
   isFindable: boolean
   locationHint: string | null
+  tags: string[]
   pingRequestedAt: string | Date | null
   pingRequestedByUserId: string | null
   pingRequestedByUsername: string | null
@@ -41,6 +42,7 @@ export type UserAgentState = {
   currentPlaceId: string | null
   isFindable: boolean
   locationHint: string | null
+  tags: string[]
   pingRequestedAt: string | null
   pingRequestedByUserId: string | null
   pingRequestedByUsername: string | null
@@ -108,6 +110,7 @@ export type PlaceAgentParticipantState = {
   status: PresenceStatus
   isFindable: boolean
   locationHint: string | null
+  tags: string[]
   pingRequestedAt: string | Date | null
   pingRequestedByUserId: string | null
   pingRequestedByUsername: string | null

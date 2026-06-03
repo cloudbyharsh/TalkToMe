@@ -62,6 +62,16 @@ function mapSession(session: NonNullable<SessionResult>): AppSession {
   }
 }
 
+function parseTags(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 function mapUserProfile(
   profileRecord: typeof userProfile.$inferSelect,
 ): UserProfileState {
@@ -74,6 +84,7 @@ function mapUserProfile(
     currentPlaceId: profileRecord.currentPlaceId,
     isFindable: profileRecord.isFindable,
     locationHint: profileRecord.locationHint,
+    tags: parseTags(profileRecord.tags),
     pingRequestedAt: profileRecord.pingRequestedAt,
     pingRequestedByUserId: profileRecord.pingRequestedByUserId,
     pingRequestedByUsername: profileRecord.pingRequestedByUsername,
@@ -330,6 +341,7 @@ function mapUserProfileStateFromAgent(
     currentPlaceId: state.currentPlaceId,
     isFindable: state.isFindable,
     locationHint: state.locationHint,
+    tags: state.tags ?? [],
     pingRequestedAt: state.pingRequestedAt,
     pingRequestedByUserId: state.pingRequestedByUserId,
     pingRequestedByUsername: state.pingRequestedByUsername,
@@ -445,6 +457,7 @@ export async function saveUserProfile(input: {
   moodEmoji: string
   intentText: string
   currentPlaceId: string
+  tags?: string[]
 }) {
   const session = await requireCurrentSession()
   const agent = await getUserAgent(session.user.id)

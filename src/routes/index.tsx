@@ -38,7 +38,7 @@ const loadNearbyPlacePreview = createServerFn({ method: 'POST' })
 
 const upsertUserProfile = createServerFn({ method: 'POST' })
   .inputValidator(
-    (input: { moodEmoji: string; intentText: string; currentPlaceId: string }) => input,
+    (input: { moodEmoji: string; intentText: string; currentPlaceId: string; tags?: string[] }) => input,
   )
   .handler(async ({ data }) => {
     return saveUserProfile(data)

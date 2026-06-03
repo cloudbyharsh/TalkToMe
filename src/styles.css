@@ -6,18 +6,25 @@
 }
 
 :root {
-  --rt-bg: #eef2ff;
-  --rt-bg-strong: #e0e7ff;
-  --rt-surface: rgba(255, 255, 255, 0.88);
-  --rt-surface-strong: #f5f7ff;
-  --rt-border: #c7d2fe;
-  --rt-border-strong: #818cf8;
-  --rt-ink: #1e1b4b;
-  --rt-ink-soft: #4338ca;
-  --rt-accent: #4f46e5;
-  --rt-accent-strong: #4338ca;
-  --rt-accent-soft: #eef2ff;
-  --rt-accent-soft-strong: #e0e7ff;
+  /* Midnight Indigo v2 — Google Stitch design spec */
+  --rt-bg: #fcf8ff;
+  --rt-bg-strong: #f0ecf9;
+  --rt-surface: #ffffff;
+  --rt-surface-strong: #f5f2ff;
+  --rt-surface-container: #f0ecf9;
+  --rt-surface-container-high: #eae6f4;
+  --rt-border: #c7c4d8;
+  --rt-border-strong: #777587;
+  --rt-ink: #1b1b24;
+  --rt-ink-soft: #464555;
+  --rt-ink-faint: #777587;
+  --rt-accent: #3525cd;
+  --rt-accent-strong: #2a1db8;
+  --rt-accent-container: #4f46e5;
+  --rt-accent-soft: #e2dfff;
+  --rt-accent-soft-strong: #c7c4d8;
+  --rt-secondary: #5b598c;
+  --rt-secondary-container: #c7c3fe;
 }
 
 html {
@@ -29,9 +36,9 @@ body {
   min-height: 100vh;
   font-family: var(--font-sans);
   background:
-    radial-gradient(circle at top left, rgba(79, 70, 229, 0.13), transparent 26%),
-    radial-gradient(circle at bottom right, rgba(30, 27, 75, 0.10), transparent 30%),
-    linear-gradient(180deg, #f5f7ff 0%, var(--rt-bg) 100%);
+    radial-gradient(circle at top left, rgba(53, 37, 205, 0.08), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(91, 89, 140, 0.07), transparent 35%),
+    linear-gradient(180deg, #fcf8ff 0%, #f5f2ff 100%);
   color: var(--rt-ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -76,7 +83,7 @@ body {
 
 .rt-modal-backdrop {
   animation: none; /* opacity handled by starting-style below */
-  background: rgba(17, 52, 44, 0.55);
+  background: rgba(27, 27, 36, 0.6);
   transition: opacity 200ms ease-out;
   @starting-style { opacity: 0; }
 }

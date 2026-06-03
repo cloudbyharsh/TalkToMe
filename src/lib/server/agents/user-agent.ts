@@ -91,6 +91,16 @@ async function loadActiveConnection(
   return connectionRecord ?? null
 }
 
+function parseTags(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 async function loadUserState(
   database: D1Database,
   userId: string,
@@ -117,6 +127,7 @@ async function loadUserState(
     currentPlaceId: profileRecord?.currentPlaceId ?? null,
     isFindable: profileRecord?.isFindable ?? false,
     locationHint: profileRecord?.locationHint ?? null,
+    tags: parseTags(profileRecord?.tags),
     pingRequestedAt: profileRecord?.pingRequestedAt?.toISOString() ?? null,
     pingRequestedByUserId: profileRecord?.pingRequestedByUserId ?? null,
     pingRequestedByUsername: profileRecord?.pingRequestedByUsername ?? null,
@@ -277,6 +288,7 @@ export class UserAgent extends Agent<UserAgentEnv, UserAgentState> {
     moodEmoji: string
     intentText: string
     currentPlaceId: string
+    tags?: string[]
   }) {
     await requirePlaceExists(this.env.DB, input.currentPlaceId)
 
@@ -291,6 +303,8 @@ export class UserAgent extends Agent<UserAgentEnv, UserAgentState> {
       .limit(1)
     const endedConnections = await endAcceptedConnectionsForUser(this.env.DB, this.name)
 
+    const tagsJson = input.tags?.length ? JSON.stringify(input.tags.slice(0, 4)) : null
+
     await db
       .insert(userProfile)
       .values({
@@ -302,6 +316,7 @@ export class UserAgent extends Agent<UserAgentEnv, UserAgentState> {
         currentPlaceId: input.currentPlaceId,
         isFindable: false,
         locationHint: null,
+        tags: tagsJson,
         pingRequestedAt: null,
         pingRequestedByUserId: null,
         pingRequestedByUsername: null,
@@ -318,6 +333,7 @@ export class UserAgent extends Agent<UserAgentEnv, UserAgentState> {
           currentPlaceId: input.currentPlaceId,
           isFindable: false,
           locationHint: null,
+          tags: tagsJson,
           pingRequestedAt: null,
           pingRequestedByUserId: null,
           pingRequestedByUsername: null,
