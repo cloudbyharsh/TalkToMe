@@ -17,6 +17,7 @@ import {
 import { authClient } from '../lib/auth-client'
 import type {
   ActiveConnectionState,
+  ActiveConnectionThread,
   AppSession,
   ConnectRequestMessage,
   CurrentPlaceState,
@@ -143,6 +144,7 @@ export function PlaceViewScreen({
   profile,
   currentPlace,
   activeConnection,
+  activeConnectionThread,
   pendingIncomingRequests,
   refreshSession,
   setReady,
@@ -159,6 +161,7 @@ export function PlaceViewScreen({
   profile: UserProfileState
   currentPlace: CurrentPlaceState
   activeConnection: ActiveConnectionState | null
+  activeConnectionThread: ActiveConnectionThread | null
   pendingIncomingRequests: IncomingConnectRequest[]
   refreshSession: () => Promise<void>
   setReady: (input: { data: { ready: boolean } }) => Promise<void>
@@ -218,10 +221,11 @@ export function PlaceViewScreen({
   const [pendingReplyRequestId, setPendingReplyRequestId] = useState<string | null>(null)
   const [replyError, setReplyError] = useState<string | null>(null)
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
-  const [acceptedRequestThread, setAcceptedRequestThread] = useState<{
-    introMessage: string | null
-    messages: ConnectRequestMessage[]
-  } | null>(null)
+
+  // Active connection (post-acceptance) chat state
+  const [activeConnectionDraft, setActiveConnectionDraft] = useState('')
+  const [isSendingActiveMessage, setIsSendingActiveMessage] = useState(false)
+  const [activeMessageError, setActiveMessageError] = useState<string | null>(null)
 
   const readyRequestInFlightRef = useRef(false)
   const motionArmedRef = useRef(false)
@@ -258,7 +262,13 @@ export function PlaceViewScreen({
               p.userId === liveConnection.recipientUserId),
         ) ?? null
       : null
-  const liveStatus = liveParticipant?.status ?? profile.status
+  // Trust the DB-backed profile status when it says in_conversation — the
+  // PlaceAgent WebSocket can lag a few hundred ms after acceptance, causing the
+  // old "ready" value to briefly win. The DB is authoritative.
+  const liveStatus =
+    profile.status === 'in_conversation'
+      ? 'in_conversation'
+      : (liveParticipant?.status ?? profile.status)
   const isFindable = liveParticipant?.isFindable ?? profile.isFindable
   const locationHint = liveParticipant?.locationHint ?? profile.locationHint
   const activePingRequestedAt =
@@ -370,14 +380,14 @@ export function PlaceViewScreen({
     if (locationHint) setSelectedFinderHint(locationHint)
   }, [locationHint])
 
-  // Auto-poll for incoming requests and message updates while the user is
-  // present/ready (not in a conversation). This keeps the request card and
-  // thread messages live without needing a manual page refresh.
+  // Auto-poll for session updates at all times:
+  // - While ready/present: keeps incoming request cards and thread messages live.
+  // - While in_conversation: keeps the active-connection chat thread live so
+  //   both users see each other's new messages without a manual refresh.
   useEffect(() => {
-    if (isInConversation) return
     const id = window.setInterval(() => {
       void refreshSession()
-    }, 6000)
+    }, isInConversation ? 5000 : 6000)
     return () => window.clearInterval(id)
   }, [isInConversation])
 
@@ -541,7 +551,6 @@ export function PlaceViewScreen({
     try {
       await endConversation()
       await refreshSession()
-      setAcceptedRequestThread(null)
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -599,6 +608,26 @@ export function PlaceViewScreen({
       setMotionAccessState('denied')
     } catch {
       setMotionAccessState('denied')
+    }
+  }
+
+  // Active connection (post-acceptance) chat handler
+  const handleSendActiveConnectionMessage = async () => {
+    if (!activeConnectionThread) return
+    const body = activeConnectionDraft.trim()
+    if (!body) return
+    setIsSendingActiveMessage(true)
+    setActiveMessageError(null)
+    try {
+      await addRequestMessage({ data: { requestId: activeConnectionThread.requestId, body } })
+      setActiveConnectionDraft('')
+      await refreshSession()
+    } catch (nextError) {
+      setActiveMessageError(
+        nextError instanceof Error ? nextError.message : 'Unable to send that message right now.',
+      )
+    } finally {
+      setIsSendingActiveMessage(false)
     }
   }
 
@@ -670,16 +699,6 @@ export function PlaceViewScreen({
     setPendingAction('respond')
     setError(null)
     try {
-      if (accept) {
-        // Capture the thread before the request disappears from the pending list
-        const req = pendingIncomingRequests.find((r) => r.id === requestId)
-        if (req) {
-          setAcceptedRequestThread({
-            introMessage: req.introMessage ?? null,
-            messages: req.messages,
-          })
-        }
-      }
       await respondToRequest({ data: { requestId, accept } })
       if (accept) {
         setConversationNotice({
@@ -687,9 +706,10 @@ export function PlaceViewScreen({
           description: 'Meet in person when ready.',
         })
       }
+      // refreshSession re-fetches getAppState which now includes activeConnectionThread,
+      // so the chat panel appears immediately with the full pre-acceptance thread.
       await refreshSession()
     } catch (nextError) {
-      setAcceptedRequestThread(null)
       setError(
         nextError instanceof Error
           ? nextError.message
@@ -1068,38 +1088,93 @@ export function PlaceViewScreen({
                 both return to ready automatically.
               </p>
 
-              {/* Show the pre-conversation thread from the request */}
-              {acceptedRequestThread &&
-              (acceptedRequestThread.introMessage || acceptedRequestThread.messages.length > 0) ? (
-                <div className="mt-4 rounded-2xl border border-[var(--rt-border)] bg-white/70 p-4">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-soft)]">
-                    Before you met
-                  </p>
-                  {acceptedRequestThread.introMessage ? (
-                    <div className="mb-2 flex justify-start">
-                      <div className="max-w-[85%] rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm leading-6 text-[var(--rt-ink)]">
-                        {acceptedRequestThread.introMessage}
+              {/* Live chat thread — stays visible and accepts new messages after acceptance */}
+              <div className="mt-4 rounded-2xl border border-[var(--rt-border)] bg-white/70 p-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--rt-ink-soft)]">
+                  Chat
+                </p>
+
+                {activeConnectionThread ? (
+                  <>
+                    {/* Intro message (sent with the original request) */}
+                    {activeConnectionThread.introMessage ? (
+                      <div className="mb-2 flex justify-start">
+                        <div className="max-w-[85%] rounded-2xl border border-[var(--rt-border)] bg-white px-4 py-2.5 text-sm leading-6 text-[var(--rt-ink)]">
+                          {activeConnectionThread.introMessage}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-                  {acceptedRequestThread.messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`mb-2 flex ${msg.senderUserId === session.user.id ? 'justify-end' : 'justify-start'}`}
-                    >
+                    ) : null}
+
+                    {/* Thread messages */}
+                    {activeConnectionThread.messages.map((msg) => (
                       <div
-                        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
-                          msg.senderUserId === session.user.id
-                            ? 'bg-[var(--rt-accent)] text-white'
-                            : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink)]'
-                        }`}
+                        key={msg.id}
+                        className={`mb-2 flex ${msg.senderUserId === session.user.id ? 'justify-end' : 'justify-start'}`}
                       >
-                        {msg.body}
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                            msg.senderUserId === session.user.id
+                              ? 'bg-[var(--rt-accent)] text-white'
+                              : 'border border-[var(--rt-border)] bg-white text-[var(--rt-ink)]'
+                          }`}
+                        >
+                          {msg.body}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+                    ))}
+
+                    {/* Send input — shown while under the message limit */}
+                    {activeConnectionThread.myMessageCount < MAX_MESSAGES_PER_USER ? (
+                      <div className="mt-3">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={activeConnectionDraft}
+                            onChange={(e) => setActiveConnectionDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (
+                                e.key === 'Enter' &&
+                                !e.shiftKey &&
+                                activeConnectionDraft.trim()
+                              ) {
+                                e.preventDefault()
+                                void handleSendActiveConnectionMessage()
+                              }
+                            }}
+                            maxLength={240}
+                            placeholder="Send a message…"
+                            disabled={isSendingActiveMessage}
+                            className="flex-1 rounded-2xl border border-[var(--rt-border)] bg-[var(--rt-surface-strong)] px-3 py-2 text-sm text-[var(--rt-ink)] outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-[color:rgba(69,104,90,0.55)] focus:border-[var(--rt-accent-strong)] focus:ring-2 focus:ring-[var(--rt-accent-soft-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleSendActiveConnectionMessage()}
+                            disabled={isSendingActiveMessage || !activeConnectionDraft.trim()}
+                            className="inline-flex items-center justify-center rounded-2xl bg-[var(--rt-accent)] px-3 py-2 text-white transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] hover:bg-[var(--rt-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label="Send message"
+                          >
+                            <Send className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {activeMessageError ? (
+                          <p className="mt-2 text-xs text-rose-600">{activeMessageError}</p>
+                        ) : null}
+                        <p className="mt-2 text-right text-xs text-[var(--rt-ink-soft)]">
+                          {activeConnectionThread.myMessageCount} of {MAX_MESSAGES_PER_USER} messages used
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-[var(--rt-ink-soft)]">
+                        You've reached the {MAX_MESSAGES_PER_USER}-message limit for this thread.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-[var(--rt-ink-soft)]">
+                    No messages yet. Say something to break the ice.
+                  </p>
+                )}
+              </div>
             </div>
           ) : null}
 

@@ -95,8 +95,14 @@ export const Route = createFileRoute('/')({
 })
 
 function App() {
-  const { session, profile, currentPlace, pendingIncomingRequests, activeConnection } =
-    Route.useLoaderData()
+  const {
+    session,
+    profile,
+    currentPlace,
+    pendingIncomingRequests,
+    activeConnection,
+    activeConnectionThread,
+  } = Route.useLoaderData()
   const router = useRouter()
 
   useEffect(() => {
@@ -156,6 +162,7 @@ function App() {
         profile={profile}
         currentPlace={currentPlace}
         activeConnection={activeConnection}
+        activeConnectionThread={activeConnectionThread}
         pendingIncomingRequests={pendingIncomingRequests}
         refreshSession={refreshSession}
         setReady={trackedSetReady}

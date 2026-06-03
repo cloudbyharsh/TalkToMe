@@ -3,6 +3,7 @@ import { getAgentByName } from 'agents'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import type {
   ActiveConnectionState,
+  ActiveConnectionThread,
   AppSession,
   AppState,
   ConnectRequestMessage,
@@ -248,6 +249,72 @@ async function getActiveConnectionForUser(
   }
 }
 
+/**
+ * Returns the chat thread for the currently-accepted connect request between
+ * two users at a given place. Called when both users are in_conversation so
+ * the chat UI can keep showing new messages after acceptance.
+ */
+async function getActiveConnectionThread(
+  userId: string,
+  counterpartUserId: string,
+  placeId: string,
+): Promise<ActiveConnectionThread | null> {
+  // The accepted connectRequest is matched by participants + place (most recent first).
+  const [requestRecord] = await db
+    .select()
+    .from(connectRequest)
+    .where(
+      and(
+        eq(connectRequest.status, 'accepted'),
+        eq(connectRequest.placeId, placeId),
+        or(
+          and(
+            eq(connectRequest.requesterUserId, userId),
+            eq(connectRequest.recipientUserId, counterpartUserId),
+          ),
+          and(
+            eq(connectRequest.requesterUserId, counterpartUserId),
+            eq(connectRequest.recipientUserId, userId),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(connectRequest.createdAt))
+    .limit(1)
+
+  if (!requestRecord) return null
+
+  const messageRows = await db
+    .select()
+    .from(connectRequestMessage)
+    .where(eq(connectRequestMessage.requestId, requestRecord.id))
+    .orderBy(asc(connectRequestMessage.createdAt))
+
+  const messages: ConnectRequestMessage[] = messageRows.map((m) => ({
+    id: m.id,
+    senderUserId: m.senderUserId,
+    body: m.body,
+    createdAt: m.createdAt,
+  }))
+
+  const myMessageCount =
+    (requestRecord.requesterUserId === userId && requestRecord.introMessage ? 1 : 0) +
+    messageRows.filter((m) => m.senderUserId === userId).length
+
+  const theirMessageCount =
+    (requestRecord.requesterUserId === counterpartUserId && requestRecord.introMessage
+      ? 1
+      : 0) + messageRows.filter((m) => m.senderUserId === counterpartUserId).length
+
+  return {
+    requestId: requestRecord.id,
+    introMessage: requestRecord.introMessage,
+    messages,
+    myMessageCount,
+    theirMessageCount,
+  }
+}
+
 function mapUserProfileStateFromAgent(
   state: UserAgentState,
   intentText: string | null,
@@ -349,12 +416,24 @@ export async function getAppState(): Promise<AppState> {
     }
   }
 
+  const activeConnection = await getActiveConnectionForUser(session.user.id)
+
+  const activeConnectionThread =
+    activeConnection
+      ? await getActiveConnectionThread(
+          session.user.id,
+          activeConnection.counterpart.userId,
+          activeConnection.placeId,
+        )
+      : null
+
   return {
     session: mapSession(session),
     profile: profileRecord ? mapUserProfile(profileRecord) : null,
     currentPlace,
     pendingIncomingRequests,
-    activeConnection: await getActiveConnectionForUser(session.user.id),
+    activeConnection,
+    activeConnectionThread,
   }
 }
 
@@ -543,12 +622,17 @@ export async function addMessageToRequest(input: {
     throw new Error('You cannot message on this request.')
   }
 
-  if (requestRecord.status !== 'pending') {
-    throw new Error('That request is no longer pending.')
+  // Allow messaging on pending requests (pre-acceptance) and accepted requests
+  // (post-acceptance chat). All other statuses mean the conversation is over.
+  if (requestRecord.status !== 'pending' && requestRecord.status !== 'accepted') {
+    throw new Error('This conversation is no longer active.')
   }
 
-  // Check expiry.
-  if (requestRecord.expiresAt.getTime() < Date.now()) {
+  // Expiry only applies to pending requests that haven't been acted on yet.
+  if (
+    requestRecord.status === 'pending' &&
+    requestRecord.expiresAt.getTime() < Date.now()
+  ) {
     await db
       .update(connectRequest)
       .set({ status: 'expired', updatedAt: new Date() })

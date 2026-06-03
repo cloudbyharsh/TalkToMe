@@ -57,12 +57,25 @@ export type NearbyPlace = {
   readyCount: number
 }
 
+// Live chat thread attached to an active (accepted) connection.
+export type ActiveConnectionThread = {
+  requestId: string
+  introMessage: string | null
+  messages: ConnectRequestMessage[]
+  /** Messages sent by the current user (introMessage counts if they were requester). */
+  myMessageCount: number
+  /** Messages sent by the counterpart. */
+  theirMessageCount: number
+}
+
 export type AppState = {
   session: AppSession | null
   profile: UserProfileState | null
   currentPlace: CurrentPlaceState | null
   pendingIncomingRequests: IncomingConnectRequest[]
   activeConnection: ActiveConnectionState | null
+  /** Chat thread for the current active connection, if any. Live-refreshed via getAppState(). */
+  activeConnectionThread: ActiveConnectionThread | null
 }
 
 export type CurrentPlaceState = {
